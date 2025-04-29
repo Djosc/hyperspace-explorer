@@ -19,6 +19,10 @@
   export let camera: THREE.PerspectiveCamera;
   export let controls: OrbitControls;
 
+  // Reactive declarations for props
+  $: cameraPosition = camera?.position;
+  $: controlsEnabled = controls?.enabled;
+
   // State
   let geometryType: GeometryType = 'hyperCube';
   let complexity: number = 5;
@@ -39,13 +43,15 @@
   let time: number = 0;
   let particles: THREE.Points;
   let particleGeometry: THREE.BufferGeometry;
-  let particleMaterial: THREE.PointsMaterial;
+  let particleMaterial: THREE.PointsMaterial | THREE.ShaderMaterial = new THREE.PointsMaterial();
   let dimensionLabels: THREE.Group;
   let animationMixer: THREE.AnimationMixer;
   let animations: THREE.AnimationClip[] = [];
   let dimensionSprites: THREE.Sprite[] = [];
   let annotations: THREE.Group;
   let dimensionProjection: number = 0.5; // Controls how much of the higher dimension is projected
+  let particleSystem: { update: (deltaTime: number) => void } | null = null;
+  let keyHandler: ((event: KeyboardEvent) => void) | null = null;
 
   // New rotation patterns
   const ROTATION_PATTERNS = {
@@ -60,6 +66,153 @@
   let rotationPhase = 0;
   let hyperRotationMatrix = new THREE.Matrix4();
   let quaternions = Array(4).fill(null).map(() => new THREE.Quaternion());
+
+  // Add lerp function for smooth interpolation
+  function lerp(start: number, end: number, t: number): number {
+    return start * (1 - t) + end * t;
+  }
+
+  // Add rotation state tracking
+  let targetRotationPhase = 0;
+  let currentRotationPhase = 0;
+  let rotationTransitionTime = 0;
+  const ROTATION_TRANSITION_DURATION = 0.5; // seconds
+  let isTransitioning = false;
+
+  // Add debounce mechanism for auto-rotation toggle
+  let lastToggleTime = 0;
+  const TOGGLE_DEBOUNCE_TIME = 1000; // 1 second debounce
+  let autoRotationToggleTimeout: number | null = null; // Track timeout for auto-rotation toggle
+
+  // Add mouse interaction variables
+  let isDragging = false;
+  let previousMousePosition = { x: 0, y: 0 };
+  let rotationSpeed = 0.05; // Reduced for smoother rotation
+  let dimensionChangeSpeed = 0.05; // Speed for changing dimension projection
+  let wasAutoRotating = false; // Track if auto-rotation was enabled before manual control
+  let manualRotationActive = false; // Track if manual rotation is currently active
+  let lastMouseInteractionTime = 0; // Track the last time mouse interaction occurred
+  const MOUSE_DEBOUNCE_TIME = 500; // 500ms debounce for mouse interactions
+  
+  // Add rotation interpolation variables
+  let targetRotation = { x: 0, y: 0, z: 0, w: 0, v: 0 }; // Added w and v for higher dimensions
+  let currentRotation = { x: 0, y: 0, z: 0, w: 0, v: 0 }; // Added w and v for higher dimensions
+  const ROTATION_INTERPOLATION_SPEED = 0.1; // Speed of rotation interpolation
+  let rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 }; // Track rotation changes for smooth interpolation
+  
+  // Add UI interaction tracking
+  let isInteractingWithUI = false; // Track if user is interacting with UI elements
+  let uiInteractionTimeout: number | null = null; // Timeout for UI interaction debounce
+  const UI_DEBOUNCE_TIME = 300; // 300ms debounce for UI interactions
+  
+  // Add UI element tracking
+  let uiElements: HTMLElement[] = []; // Track UI elements that should be excluded from rotation
+
+  // Function to safely toggle auto-rotation with debounce
+  function safeToggleAutoRotation(enable: boolean) {
+    const currentTime = Date.now();
+    if (currentTime - lastToggleTime > TOGGLE_DEBOUNCE_TIME) {
+      if ($appStore.autoRotateDimensions !== enable) {
+        // Store current rotation state before toggling
+        const currentRotationState = {
+          x: mesh?.rotation.x || 0,
+          y: mesh?.rotation.y || 0,
+          z: mesh?.rotation.z || 0,
+          w: currentRotation.w,
+          v: currentRotation.v
+        };
+        
+        // Toggle the auto-rotation state
+        appStore.toggleDimensionRotation();
+        lastToggleTime = currentTime;
+        
+        // If we're disabling auto-rotation, preserve the current rotation
+        if (!enable && mesh) {
+          // Set target rotation to current rotation to prevent reset
+          targetRotation = { ...currentRotationState };
+          currentRotation = { ...currentRotationState };
+          rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
+        }
+      }
+    }
+  }
+
+  // Function to safely pause auto-rotation
+  function pauseAutoRotation() {
+    // Only pause if auto-rotation is currently active
+    if ($appStore.autoRotateDimensions) {
+      console.log('Pausing auto-rotation');
+      wasAutoRotating = true;
+      manualRotationActive = true;
+      
+      // Clear any existing timeout to prevent race conditions
+      if (autoRotationToggleTimeout !== null) {
+        clearTimeout(autoRotationToggleTimeout);
+        autoRotationToggleTimeout = null;
+      }
+      
+      // Store current rotation state before toggling
+      const currentRotationState = {
+        x: mesh?.rotation.x || 0,
+        y: mesh?.rotation.y || 0,
+        z: mesh?.rotation.z || 0,
+        w: currentRotation.w,
+        v: currentRotation.v
+      };
+      
+      // Toggle auto-rotation off
+      appStore.toggleDimensionRotation();
+      lastToggleTime = Date.now();
+      
+      // Preserve the current rotation
+      targetRotation = { ...currentRotationState };
+      currentRotation = { ...currentRotationState };
+      rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
+    }
+  }
+
+  // Function to safely resume auto-rotation
+  function resumeAutoRotation() {
+    // Only resume if we previously paused it
+    if (wasAutoRotating && manualRotationActive) {
+      console.log('Will resume auto-rotation after delay');
+      manualRotationActive = false;
+      
+      // Clear any existing timeout to prevent race conditions
+      if (autoRotationToggleTimeout !== null) {
+        clearTimeout(autoRotationToggleTimeout);
+      }
+      
+      // Set a new timeout to resume auto-rotation
+      autoRotationToggleTimeout = window.setTimeout(() => {
+        if (wasAutoRotating) {
+          console.log('Resuming auto-rotation');
+          // Check if enough time has passed since last toggle
+          const currentTime = Date.now();
+          if (currentTime - lastToggleTime > TOGGLE_DEBOUNCE_TIME) {
+            // Store current rotation state before toggling
+            const currentRotationState = {
+              x: mesh?.rotation.x || 0,
+              y: mesh?.rotation.y || 0,
+              z: mesh?.rotation.z || 0,
+              w: currentRotation.w,
+              v: currentRotation.v
+            };
+            
+            // Toggle auto-rotation on
+            appStore.toggleDimensionRotation();
+            lastToggleTime = currentTime;
+            
+            // Preserve the current rotation
+            targetRotation = { ...currentRotationState };
+            currentRotation = { ...currentRotationState };
+            rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
+          }
+          wasAutoRotating = false;
+        }
+      }, 1000); // Resume after 1 second
+    }
+  }
 
   // Subscribe to store
   $: {
@@ -87,44 +240,271 @@
 
   // Separate function for geometry updates
   function updateGeometry() {
-    console.log('Updating geometry:', { geometryType, complexity, symmetry });
+    // Set transitioning flag to prevent interactions during transition
+    isTransitioning = true;
     
     // Create new geometry
     const newGeometry = createGeometry(geometryType, complexity, symmetry);
     
     // Initialize or update mesh
     if (!mesh) {
-      console.log('Creating new mesh');
       geometry = newGeometry;
       material = createMaterial(colorMode) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
       mesh = new THREE.Mesh(geometry, material);
       scene.add(mesh);
-      
+
       // Initialize animation mixer after mesh is created
       animationMixer = new THREE.AnimationMixer(mesh);
-      
+    
       // Create animations
       createAnimations();
-      
+    
       // Create supporting systems
       createParticleSystem();
       createDimensionLabels();
       createAnnotations();
-    } else {
-      console.log('Updating existing mesh');
-      // Dispose of old geometry
-      if (geometry) geometry.dispose();
-      geometry = newGeometry;
-      mesh.geometry = geometry;
       
-      // Update animations for new geometry
-      createAnimations();
+      // Transition complete
+      isTransitioning = false;
+    } else {
+      // Store current auto-rotation state
+      const wasAutoRotating = $appStore.autoRotateDimensions;
+      
+      // Temporarily disable auto-rotation during transition
+      if (wasAutoRotating) {
+        safeToggleAutoRotation(false);
+      }
+      
+      // Create a black hole effect by adding a temporary black material
+      const originalMaterial = mesh.material;
+      const blackHoleMaterial = new THREE.MeshBasicMaterial({ 
+        color: 0x000000,
+        transparent: true,
+        opacity: 1
+      });
+      
+      // Create a temporary black sphere for the black hole effect
+      const blackHoleGeometry = new THREE.SphereGeometry(0.1, 32, 32);
+      const blackHole = new THREE.Mesh(blackHoleGeometry, blackHoleMaterial);
+      blackHole.position.copy(mesh.position);
+      scene.add(blackHole);
+      
+      // Create a white hole effect (explosion)
+      const whiteHoleMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending
+      });
+      
+      const whiteHoleGeometry = new THREE.SphereGeometry(0.1, 32, 32);
+      const whiteHole = new THREE.Mesh(whiteHoleGeometry, whiteHoleMaterial);
+      whiteHole.position.copy(mesh.position);
+      scene.add(whiteHole);
+      
+      // Adjust animation duration based on complexity
+      const collapseDuration = Math.min(0.7 + (complexity * 0.05), 1.5);
+      const expandDuration = Math.min(1.2 + (complexity * 0.1), 2.5);
+      
+      // Create timeline for synchronized animations
+      const timeline = gsap.timeline({
+        onUpdate: () => {
+          // Make the black hole grow as the mesh shrinks
+          const scale = 1 - mesh.scale.x;
+          blackHole.scale.set(scale * 2, scale * 2, scale * 2);
+          
+          // Make the mesh darker as it collapses
+          if (originalMaterial && 'uniforms' in originalMaterial && originalMaterial.uniforms) {
+            const uniforms = originalMaterial.uniforms as {
+              brightness?: { value: number };
+              saturation?: { value: number };
+            };
+            
+            if (uniforms.brightness) {
+              uniforms.brightness.value = 1 - scale;
+            }
+            if (uniforms.saturation) {
+              uniforms.saturation.value = 1 - scale * 0.5;
+            }
+          }
+        }
+      });
+
+      // Add collapse animation to timeline
+      timeline.to(mesh.scale, {
+        x: 0.01,
+        y: 0.01,
+        z: 0.01,
+        duration: collapseDuration,
+        ease: "power3.in",
+        onComplete: () => {
+          // Remove the mesh from the scene
+          scene.remove(mesh);
+          
+          // Dispose of old geometry
+          if (geometry) geometry.dispose();
+          geometry = newGeometry;
+          
+          // Create new material for the new geometry
+          const newMaterial = createMaterial(colorMode) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
+          
+          // Create new mesh with the new geometry and material
+          mesh = new THREE.Mesh(geometry, newMaterial);
+          
+          // Always reset to default position
+          mesh.position.set(0, 0, 0);
+          mesh.rotation.set(0, 0, 0);
+          mesh.scale.set(0.01, 0.01, 0.01); // Start small
+          
+          // Initially hide the new mesh
+          if ('uniforms' in newMaterial && newMaterial.uniforms) {
+            const uniforms = newMaterial.uniforms as {
+              opacity?: { value: number };
+            };
+            if (uniforms.opacity) {
+              uniforms.opacity.value = 0;
+            }
+          }
+          
+          // Add the new mesh to the scene
+          scene.add(mesh);
+          
+          // Update animations for new geometry
+          createAnimations();
+          
+          // Animate the black hole to shrink
+          timeline.to(blackHole.scale, {
+            x: 0.1,
+            y: 0.1,
+            z: 0.1,
+            duration: 0.5,
+            ease: "power2.inOut",
+            onComplete: () => {
+              // Remove the black hole
+              scene.remove(blackHole);
+              blackHoleGeometry.dispose();
+              blackHoleMaterial.dispose();
+              
+              // Trigger white hole explosion
+              timeline.to(whiteHole.scale, {
+                x: 0.1,
+                y: 0.1,
+                z: 0.1,
+                duration: 0.2,
+                ease: "power2.in"
+              }, "<");
+              
+              timeline.to(whiteHole.scale, {
+                x: 10,
+                y: 10,
+                z: 10,
+                duration: 0.5,
+                ease: "power2.out"
+              });
+              
+              timeline.to(whiteHoleMaterial, {
+                opacity: 0,
+                duration: 0.5,
+                ease: "power2.out",
+                onComplete: () => {
+                  scene.remove(whiteHole);
+                  whiteHoleGeometry.dispose();
+                  whiteHoleMaterial.dispose();
+                }
+              }, "<");
+              
+              // Add a subtle glow effect for higher complexity geometries
+              if (complexity > 7) {
+                // Create a glow effect
+                const glowMaterial = new THREE.MeshBasicMaterial({
+                  color: 0xffffff,
+                  transparent: true,
+                  opacity: 0.8,
+                  blending: THREE.AdditiveBlending
+                });
+                
+                const glowGeometry = new THREE.SphereGeometry(0.5, 32, 32);
+                const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+                glow.position.copy(mesh.position);
+                scene.add(glow);
+                
+                // Animate the glow
+                timeline.to(glow.scale, {
+                  x: 3,
+                  y: 3,
+                  z: 3,
+                  duration: expandDuration * 0.7,
+                  ease: "power2.out"
+                }, "<");
+                
+                timeline.to(glowMaterial, {
+                  opacity: 0,
+                  duration: expandDuration * 0.7,
+                  ease: "power2.out",
+                  onComplete: () => {
+                    scene.remove(glow);
+                    glowGeometry.dispose();
+                    glowMaterial.dispose();
+                  }
+                }, "<");
+              }
+              
+              // Create a more sophisticated regrowth animation with intermediate steps
+              // First, fade in the new mesh
+              if ('uniforms' in newMaterial && newMaterial.uniforms) {
+                const uniforms = newMaterial.uniforms as {
+                  opacity?: { value: number };
+                };
+                if (uniforms.opacity) {
+                  timeline.to(uniforms.opacity, {
+                    value: 1,
+                    duration: 0.3,
+                    ease: "power2.inOut"
+                  }, "<");
+                }
+              }
+              
+              // Two-stage growth animation
+              timeline.to(mesh.scale, {
+                x: 0.4,
+                y: 0.4,
+                z: 0.4,
+                duration: expandDuration * 0.4,
+                ease: "power2.out"
+              }, "<");
+              
+              // Brief pause at intermediate size
+              timeline.to({}, {
+                duration: expandDuration * 0.1
+              });
+              
+              // Second growth stage (0.4 -> 1.0)
+              timeline.to(mesh.scale, {
+                x: 1,
+                y: 1,
+                z: 1,
+                duration: expandDuration * 0.5,
+                ease: "elastic.out(1, 0.3)",
+                onComplete: () => {
+                  // Re-enable auto-rotation after a brief pause for smoothness
+                  setTimeout(() => {
+                    if (wasAutoRotating) {
+                      safeToggleAutoRotation(true);
+                    }
+                    // Transition complete
+                    isTransitioning = false;
+                  }, 500); // 500ms pause before resuming auto-rotation
+                }
+              });
+            }
+          });
+        }
+      });
     }
   }
 
   // Update material when color mode changes
   $: if (colorMode && material) {
-    console.log('Updating material for color mode:', colorMode);
     const newMaterial = createMaterial(colorMode) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
     if (mesh) {
       // Update material uniforms based on dimension mode
@@ -226,42 +606,267 @@
     annotations.visible = showAnnotations;
   }
 
-  // Create particle system
+  // Create enhanced particle system
   function createParticleSystem() {
-    const particleCount = 1000;
+    // Increase particle count for more density
+    const particleCount = 2000;
+    
+    // Create arrays for particle attributes
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
+    const velocities = new Float32Array(particleCount * 3);
+    const phases = new Float32Array(particleCount);
     
+    // Color palette based on current color mode
+    const colorPalettes = {
+      spectralShift: [
+        new THREE.Color(0xff0000), // Red
+        new THREE.Color(0xff7f00), // Orange
+        new THREE.Color(0xffff00), // Yellow
+        new THREE.Color(0x00ff00), // Green
+        new THREE.Color(0x0000ff), // Blue
+        new THREE.Color(0x4b0082), // Indigo
+        new THREE.Color(0x9400d3)  // Violet
+      ],
+      kaleidoscope: [
+        new THREE.Color(0xff00ff), // Magenta
+        new THREE.Color(0x00ffff), // Cyan
+        new THREE.Color(0xffff00), // Yellow
+        new THREE.Color(0xff0000), // Red
+        new THREE.Color(0x00ff00), // Green
+        new THREE.Color(0x0000ff)  // Blue
+      ],
+      both: [
+        new THREE.Color(0xff00ff), // Magenta
+        new THREE.Color(0x00ffff), // Cyan
+        new THREE.Color(0xffff00), // Yellow
+        new THREE.Color(0xff0000), // Red
+        new THREE.Color(0x00ff00), // Green
+        new THREE.Color(0x0000ff)  // Blue
+      ],
+      hyperspace: [
+        new THREE.Color(0x0000ff), // Blue
+        new THREE.Color(0x00ffff), // Cyan
+        new THREE.Color(0x00ff00), // Green
+        new THREE.Color(0xffff00), // Yellow
+        new THREE.Color(0xff0000)  // Red
+      ],
+      mathematical: [
+        new THREE.Color(0xffffff), // White
+        new THREE.Color(0x00ffff), // Cyan
+        new THREE.Color(0x0000ff), // Blue
+        new THREE.Color(0x000080)  // Navy
+      ],
+      soundResonance: [
+        new THREE.Color(0xff0000), // Red
+        new THREE.Color(0xff7f00), // Orange
+        new THREE.Color(0xffff00), // Yellow
+        new THREE.Color(0x00ff00), // Green
+        new THREE.Color(0x0000ff)  // Blue
+      ],
+      fractal: [
+        new THREE.Color(0x00ff00), // Green
+        new THREE.Color(0x008000), // Dark Green
+        new THREE.Color(0x0000ff), // Blue
+        new THREE.Color(0x000080)  // Navy
+      ],
+      quantumField: [
+        new THREE.Color(0x0000ff), // Blue
+        new THREE.Color(0x00ffff), // Cyan
+        new THREE.Color(0xffffff), // White
+        new THREE.Color(0x000080)  // Navy
+      ]
+    };
+    
+    // Get current color palette or default to spectralShift
+    const currentPalette = colorPalettes[colorMode] || colorPalettes.spectralShift;
+    
+    // Create different particle patterns based on geometry type
     for (let i = 0; i < particleCount; i++) {
-      // Position particles in a sphere around the mesh
-      const radius = 5 + Math.random() * 5;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
+      // Determine particle pattern based on geometry type
+      let radius, theta, phi;
       
-      positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-      positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-      positions[i * 3 + 2] = radius * Math.cos(phi);
+      switch(geometryType) {
+        case 'hyperCube':
+        case 'tesseract':
+          // Cubic distribution for hypercube
+          const cubeSize = 10;
+          positions[i * 3] = (Math.random() - 0.5) * cubeSize;
+          positions[i * 3 + 1] = (Math.random() - 0.5) * cubeSize;
+          positions[i * 3 + 2] = (Math.random() - 0.5) * cubeSize;
+          break;
+          
+        case 'mandala':
+          // Spiral distribution for mandala
+          const spiralRadius = 2 + Math.random() * 8;
+          const spiralAngle = Math.random() * Math.PI * 20;
+          positions[i * 3] = spiralRadius * Math.cos(spiralAngle);
+          positions[i * 3 + 1] = spiralRadius * Math.sin(spiralAngle);
+          positions[i * 3 + 2] = (Math.random() - 0.5) * 5;
+          break;
+          
+        case 'vortex':
+          // Vortex distribution
+          const vortexRadius = 1 + Math.random() * 9;
+          const vortexAngle = Math.random() * Math.PI * 2;
+          const vortexHeight = (Math.random() - 0.5) * 10;
+          positions[i * 3] = vortexRadius * Math.cos(vortexAngle);
+          positions[i * 3 + 1] = vortexRadius * Math.sin(vortexAngle);
+          positions[i * 3 + 2] = vortexHeight;
+          break;
+          
+        case 'fractal':
+          // Fractal-like distribution
+          const fractalScale = Math.pow(2, Math.floor(Math.random() * 4));
+          const fractalRadius = 2 + Math.random() * 8;
+          const fractalAngle = Math.random() * Math.PI * 2 * fractalScale;
+          positions[i * 3] = fractalRadius * Math.cos(fractalAngle);
+          positions[i * 3 + 1] = fractalRadius * Math.sin(fractalAngle);
+          positions[i * 3 + 2] = (Math.random() - 0.5) * 5;
+          break;
+          
+        case 'quantumField':
+          // Quantum field distribution with uncertainty
+          const quantumRadius = 3 + Math.random() * 7;
+          const quantumAngle = Math.random() * Math.PI * 2;
+          const quantumHeight = (Math.random() - 0.5) * 8;
+          positions[i * 3] = quantumRadius * Math.cos(quantumAngle) + (Math.random() - 0.5) * 2;
+          positions[i * 3 + 1] = quantumRadius * Math.sin(quantumAngle) + (Math.random() - 0.5) * 2;
+          positions[i * 3 + 2] = quantumHeight + (Math.random() - 0.5) * 2;
+          break;
+          
+        default:
+          // Default spherical distribution
+          radius = 5 + Math.random() * 5;
+          theta = Math.random() * Math.PI * 2;
+          phi = Math.acos(2 * Math.random() - 1);
+          
+          positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+          positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+          positions[i * 3 + 2] = radius * Math.cos(phi);
+      }
       
-      // Random colors
-      colors[i * 3] = Math.random();
-      colors[i * 3 + 1] = Math.random();
-      colors[i * 3 + 2] = Math.random();
+      // Assign colors from the current palette
+      const colorIndex = Math.floor(Math.random() * currentPalette.length);
+      const color = currentPalette[colorIndex];
+      
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
+      
+      // Vary particle sizes
+      sizes[i] = 0.05 + Math.random() * 0.15;
+      
+      // Add random velocities for movement
+      velocities[i * 3] = (Math.random() - 0.5) * 0.02;
+      velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.02;
+      velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.02;
+      
+      // Add random phases for pulsing effect
+      phases[i] = Math.random() * Math.PI * 2;
     }
     
+    // Create geometry with all attributes
     particleGeometry = new THREE.BufferGeometry();
     particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    particleGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
     
-    particleMaterial = new THREE.PointsMaterial({
-      size: 0.1,
-      vertexColors: true,
+    // Store velocities and phases for animation
+    particleGeometry.userData.velocities = velocities;
+    particleGeometry.userData.phases = phases;
+    
+    // Create custom shader material for more interesting particles
+    const particleVertexShader = `
+      attribute float size;
+      attribute vec3 color;
+      varying vec3 vColor;
+      uniform float time;
+      
+      void main() {
+        vColor = color;
+        
+        // Calculate pulsing effect
+        float pulse = sin(time * 0.5 + position.x * 0.1 + position.y * 0.1 + position.z * 0.1) * 0.5 + 0.5;
+        float finalSize = size * (1.0 + pulse * 0.3);
+        
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = finalSize * (300.0 / -mvPosition.z);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `;
+    
+    const particleFragmentShader = `
+      varying vec3 vColor;
+      uniform float time;
+      
+      void main() {
+        // Create a circular particle with soft edges
+        float r = 0.0;
+        vec2 cxy = 2.0 * gl_PointCoord - 1.0;
+        r = dot(cxy, cxy);
+        
+        if (r > 1.0) {
+          discard;
+        }
+        
+        // Add a subtle glow effect
+        float glow = 1.0 - r;
+        glow = pow(glow, 2.0);
+        
+        // Add a subtle color shift based on time
+        vec3 finalColor = vColor + vec3(sin(time * 0.2) * 0.05, cos(time * 0.3) * 0.05, sin(time * 0.4) * 0.05);
+        
+        gl_FragColor = vec4(finalColor, glow);
+      }
+    `;
+    
+    // Create shader material
+    const shaderMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 }
+      },
+      vertexShader: particleVertexShader,
+      fragmentShader: particleFragmentShader,
       transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
     });
     
-    particles = new THREE.Points(particleGeometry, particleMaterial);
+    // Create particle system
+    particles = new THREE.Points(particleGeometry, shaderMaterial);
     scene.add(particles);
+    
+    // Store reference to update in animation loop
+    particleSystem = {
+      update: (deltaTime: number) => {
+        // Update time uniform for shader
+        if (shaderMaterial.uniforms && shaderMaterial.uniforms.time) {
+          shaderMaterial.uniforms.time.value += deltaTime;
+        }
+        
+        // Get position attribute
+        const positions = particleGeometry.attributes.position.array;
+        const velocities = particleGeometry.userData.velocities;
+        
+        // Update particle positions
+        for (let i = 0; i < positions.length; i += 3) {
+          positions[i] += velocities[i] * deltaTime * 30;
+          positions[i + 1] += velocities[i + 1] * deltaTime * 30;
+          positions[i + 2] += velocities[i + 2] * deltaTime * 30;
+          
+          // Wrap particles around if they go too far
+          const maxDistance = 15;
+          if (Math.abs(positions[i]) > maxDistance) positions[i] = -Math.sign(positions[i]) * maxDistance;
+          if (Math.abs(positions[i + 1]) > maxDistance) positions[i + 1] = -Math.sign(positions[i + 1]) * maxDistance;
+          if (Math.abs(positions[i + 2]) > maxDistance) positions[i + 2] = -Math.sign(positions[i + 2]) * maxDistance;
+        }
+        
+        // Mark position attribute as needing update
+        particleGeometry.attributes.position.needsUpdate = true;
+      }
+    };
   }
 
   // Create dimension labels using sprites
@@ -346,7 +951,13 @@
       hyper7D: 'A 7D hypercube revealing intricate higher-dimensional symmetries.',
       hyper8D: 'An 8D hypercube demonstrating advanced dimensional interconnections.',
       hyper9D: 'A 9D hypercube exploring the limits of human spatial perception.',
-      hyper10D: 'A 10D hypercube at the boundary of comprehensible dimensional space.'
+      hyper10D: 'A 10D hypercube at the boundary of comprehensible dimensional space.',
+      hopfFibration: 'A Hopf fibration visualization showing the mapping from 3-sphere to 2-sphere.',
+      goldenSpiral: 'A golden spiral based on the golden ratio (φ) and Fibonacci sequence.',
+      piSpiral: 'A spiral visualization based on the digits of π.',
+      kleinBottle: 'A Klein bottle, a non-orientable surface with no inside or outside.',
+      mobiusStrip: 'A Möbius strip, a one-sided surface with no boundary.',
+      torusKnot: 'A torus knot, a closed curve on the surface of a torus.'
     };
     
     // Create annotation for current geometry type
@@ -506,37 +1117,48 @@
   function updateDimensionProjection() {
     if (material && 'uniforms' in material && material.uniforms) {
       if ('dimensionProjection' in material.uniforms && material.uniforms.dimensionProjection && material.uniforms.dimensionProjection.value !== undefined) {
-      switch (dimensionMode) {
-        case '3D':
-            material.uniforms.dimensionProjection.value = 0.2;
-            break;
-          case '4D':
-            material.uniforms.dimensionProjection.value = 0.4;
-            break;
-          case '5D':
-            material.uniforms.dimensionProjection.value = 0.6;
-            break;
-          case '6D':
-            material.uniforms.dimensionProjection.value = 0.7;
-            break;
-          case '7D':
-            material.uniforms.dimensionProjection.value = 0.8;
-            break;
-          case '8D':
-            material.uniforms.dimensionProjection.value = 0.85;
-            break;
-          case '9D':
-            material.uniforms.dimensionProjection.value = 0.9;
-            break;
-          case '10D':
-            material.uniforms.dimensionProjection.value = 0.95;
-            break;
-          case 'all':
-            material.uniforms.dimensionProjection.value = 1.0;
-            break;
+        // If dimensionProjection was manually set (not through dimension mode), use that value
+        if (dimensionProjection !== undefined && dimensionProjection !== null) {
+          material.uniforms.dimensionProjection.value = dimensionProjection;
+        } else {
+          // Otherwise, set based on dimension mode
+          switch (dimensionMode) {
+            case '3D':
+              material.uniforms.dimensionProjection.value = 0.2;
+              break;
+            case '4D':
+              material.uniforms.dimensionProjection.value = 0.4;
+              break;
+            case '5D':
+              material.uniforms.dimensionProjection.value = 0.6;
+              break;
+            case '6D':
+              material.uniforms.dimensionProjection.value = 0.7;
+              break;
+            case '7D':
+              material.uniforms.dimensionProjection.value = 0.8;
+              break;
+            case '8D':
+              material.uniforms.dimensionProjection.value = 0.85;
+              break;
+            case '9D':
+              material.uniforms.dimensionProjection.value = 0.9;
+              break;
+            case '10D':
+              material.uniforms.dimensionProjection.value = 0.95;
+              break;
+            case 'all':
+              material.uniforms.dimensionProjection.value = 1.0;
+              break;
+          }
         }
       }
     }
+  }
+
+  // Reactive statement to update dimension projection when it changes
+  $: if (dimensionProjection !== undefined) {
+    updateDimensionProjection();
   }
 
   // Update material based on geometry type
@@ -678,7 +1300,7 @@
     }
   }
 
-  // Update the existing update function
+  // Update the update function to use smooth rotation transitions
   function update(deltaTime: number) {
     const cappedDelta = Math.min(deltaTime, 0.1);
     time += cappedDelta;
@@ -705,15 +1327,50 @@
         currentPattern = ROTATION_PATTERNS.SPIRAL;
     }
 
-    if (mesh && $appStore.autoRotateDimensions) {
+    // Apply smooth rotation interpolation
+    if (mesh) {
+      // Interpolate current rotation towards target rotation
+      currentRotation.x += (targetRotation.x - currentRotation.x) * ROTATION_INTERPOLATION_SPEED;
+      currentRotation.y += (targetRotation.y - currentRotation.y) * ROTATION_INTERPOLATION_SPEED;
+      currentRotation.z += (targetRotation.z - currentRotation.z) * ROTATION_INTERPOLATION_SPEED;
+      currentRotation.w += (targetRotation.w - currentRotation.w) * ROTATION_INTERPOLATION_SPEED;
+      currentRotation.v += (targetRotation.v - currentRotation.v) * ROTATION_INTERPOLATION_SPEED;
+      
+      // Apply interpolated rotation to mesh
+      mesh.rotation.x = currentRotation.x;
+      mesh.rotation.y = currentRotation.y;
+      mesh.rotation.z = currentRotation.z;
+      
+      // Apply higher dimension rotations through quaternions or matrix transformations
+      if (currentRotation.w !== 0 || currentRotation.v !== 0) {
+        // Create quaternions for W and V axis rotations
+        const wQuaternion = new THREE.Quaternion();
+        wQuaternion.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), currentRotation.w);
+        
+        const vQuaternion = new THREE.Quaternion();
+        vQuaternion.setFromAxisAngle(new THREE.Vector3(-1, 1, -1).normalize(), currentRotation.v);
+        
+        // Apply quaternions to mesh
+        mesh.quaternion.multiplyQuaternions(wQuaternion, mesh.quaternion);
+        mesh.quaternion.multiplyQuaternions(vQuaternion, mesh.quaternion);
+      }
+      
+      // Update rotation phase for shader effects
+      rotationPhase = currentRotation.y;
+    }
+
+    // Only apply auto-rotation if auto-rotation is enabled and manual rotation is not active
+    if (mesh && $appStore.autoRotateDimensions && !manualRotationActive) {
       applyHyperRotation(mesh, cappedDelta);
     }
 
-    if (particles) {
-      applyHyperRotation(particles, cappedDelta * 0.5);
+    // Update particle system if it exists
+    if (particleSystem) {
+      particleSystem.update(cappedDelta);
     }
 
-    if (dimensionLabels) {
+    // Only rotate dimension labels if auto-rotation is enabled and manual rotation is not active
+    if (dimensionLabels && $appStore.autoRotateDimensions && !manualRotationActive) {
       applyHyperRotation(dimensionLabels, cappedDelta * 0.3);
     }
 
@@ -724,12 +1381,143 @@
       material.uniforms.dimensionFactor = { 
         value: parseInt($appStore.dimensionMode) || 3 
       };
+      
+      // Add higher dimension rotation uniforms if they exist
+      if ('wRotation' in material.uniforms) {
+        material.uniforms.wRotation = { value: currentRotation.w };
+      }
+      if ('vRotation' in material.uniforms) {
+        material.uniforms.vRotation = { value: currentRotation.v };
+      }
+    }
+  }
+
+  // Function to handle mouse down event
+  function handleMouseDown(event: MouseEvent) {
+    // Check if the click is on a UI element
+    const target = event.target as HTMLElement;
+    
+    // Check if the click is on a UI element or its children
+    const isUIElement = target.closest('.ui-element') || 
+                        target.closest('button') || 
+                        target.closest('a') ||
+                        target.closest('.controls') ||
+                        target.closest('.debug-info');
+    
+    if (isUIElement) {
+      console.log('UI element clicked, ignoring for rotation');
+      isInteractingWithUI = true;
+      
+      // Clear any existing timeout
+      if (uiInteractionTimeout !== null) {
+        clearTimeout(uiInteractionTimeout);
+      }
+      
+      // Set a timeout to reset the UI interaction flag
+      uiInteractionTimeout = window.setTimeout(() => {
+        isInteractingWithUI = false;
+      }, UI_DEBOUNCE_TIME);
+      
+      return; // Don't process rotation if interacting with UI
+    }
+    
+    console.log('Scene element clicked, starting rotation');
+    isDragging = true;
+    previousMousePosition = {
+      x: event.clientX,
+      y: event.clientY
+    };
+    
+    // Pause auto-rotation when manual control starts
+    pauseAutoRotation();
+  }
+
+  // Function to handle mouse move event
+  function handleMouseMove(event: MouseEvent) {
+    // Skip if interacting with UI
+    if (isInteractingWithUI) return;
+    
+    if (!isDragging) return;
+    
+    const deltaMove = {
+      x: event.clientX - previousMousePosition.x,
+      y: event.clientY - previousMousePosition.y
+    };
+    
+    // Only process movement if we're actually dragging (not just hovering)
+    if (Math.abs(deltaMove.x) > 2 || Math.abs(deltaMove.y) > 2) {
+      console.log(`Mouse move: dx=${deltaMove.x.toFixed(2)}, dy=${deltaMove.y.toFixed(2)}`);
+      
+      // Update rotation deltas for smooth interpolation
+      rotationDelta.y += deltaMove.x * 0.01;
+      rotationDelta.x += deltaMove.y * 0.01;
+      
+      // Update target rotation
+      targetRotation.y += deltaMove.x * 0.01;
+      targetRotation.x += deltaMove.y * 0.01;
+      
+      // Update dimension projection based on vertical movement
+      dimensionProjection = Math.max(0.1, Math.min(1.0, dimensionProjection + deltaMove.y * 0.005));
+      updateDimensionProjection();
+    }
+    
+    // Update previous mouse position
+    previousMousePosition = {
+      x: event.clientX,
+      y: event.clientY
+    };
+  }
+
+  // Function to handle mouse wheel event
+  function handleMouseWheel(event: WheelEvent) {
+    // Skip if interacting with UI
+    if (isInteractingWithUI) return;
+    
+    // Prevent default scrolling behavior
+    event.preventDefault();
+    
+    // Use wheel delta for Z-axis rotation
+    const wheelDelta = event.deltaY * 0.001;
+    
+    // Check if Alt key is pressed for W-axis rotation
+    if (event.altKey) {
+      // Update W-axis rotation when Alt is pressed
+      rotationDelta.w += wheelDelta;
+      targetRotation.w += wheelDelta;
+    } else {
+      // Normal Z-axis rotation when Alt is not pressed
+      rotationDelta.z += wheelDelta;
+      targetRotation.z += wheelDelta;
+    }
+    
+    // Don't toggle auto-rotation for wheel events to prevent excessive toggling
+    // Just update the rotation state
+  }
+
+  // Function to handle mouse up event
+  function handleMouseUp() {
+    if (isDragging) {
+      console.log('Mouse up event triggered');
+      isDragging = false;
+      
+      // Resume auto-rotation after a delay if it was enabled before
+      resumeAutoRotation();
+    }
+  }
+
+  // Function to handle mouse leave event
+  function handleMouseLeave() {
+    if (isDragging) {
+      console.log('Mouse leave event triggered');
+      isDragging = false;
+      
+      // Resume auto-rotation after a delay if it was enabled before
+      resumeAutoRotation();
     }
   }
 
   // Initialize on mount
   onMount(() => {
-    // Removed console.log
     clock = new THREE.Clock();
     
     // Set initial camera position
@@ -740,6 +1528,10 @@
     
     // Configure OrbitControls for better interaction
     if (controls) {
+      // Set a fixed target point for the camera to orbit around
+      controls.target.set(0, 0, 0);
+      
+      // Use a fixed reference frame for rotation
       controls.enableDamping = true; // Add smooth damping effect
       controls.dampingFactor = 0.05;
       controls.enableZoom = true; // Enable zooming
@@ -750,6 +1542,9 @@
       controls.panSpeed = 0.5; // Adjust pan speed
       controls.minDistance = 2; // Minimum zoom distance
       controls.maxDistance = 20; // Maximum zoom distance
+      
+      // Set up a fixed reference frame for rotation
+      controls.object.up.set(0, 1, 0); // Set up vector to Y axis
       controls.update();
     }
     
@@ -775,12 +1570,175 @@
     pointLight3.position.set(0, 0, -5);
     scene.add(pointLight3);
     
+    // Initialize rotation state
+    currentRotationPhase = 0;
+    targetRotationPhase = 0;
+    rotationPhase = 0;
+    isTransitioning = false;
+    
+    // Initialize rotation vectors
+    currentRotation = { x: 0, y: 0, z: 0, w: 0, v: 0 };
+    targetRotation = { x: 0, y: 0, z: 0, w: 0, v: 0 };
+    rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
+    
     // Enable auto-rotation through dimensions
     appStore.toggleDimensionRotation();
+    lastToggleTime = Date.now();
+    
+    // Set up keyboard controls for dimension rotation
+    keyHandler = (event: KeyboardEvent) => {
+      // Only handle dimension rotation when not playing
+      if (!isPlaying) {
+        // Ignore key interactions during geometry transitions
+        if (isTransitioning) return;
+        
+        // Check if this is a rotation key
+        const isRotationKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'z', 'Z', 'x', 'X'].includes(event.key);
+        
+        // Pause auto-rotation when manual control starts
+        if (isRotationKey && $appStore.autoRotateDimensions) {
+          pauseAutoRotation();
+          
+          // Resume auto-rotation after a delay
+          resumeAutoRotation();
+        }
+        
+        // Check if Alt key is pressed for higher dimension rotation
+        const isAltPressed = event.altKey;
+        
+        switch(event.key) {
+          case 'ArrowUp':
+            if (isAltPressed) {
+              // Rotate around W axis when Alt is pressed
+              rotationDelta.w += rotationSpeed;
+              targetRotation.w += rotationSpeed;
+            } else {
+              // Rotate around X axis (pitch)
+              rotationDelta.x += rotationSpeed;
+              targetRotation.x += rotationSpeed;
+            }
+            break;
+          case 'ArrowDown':
+            if (isAltPressed) {
+              // Rotate around W axis when Alt is pressed
+              rotationDelta.w -= rotationSpeed;
+              targetRotation.w -= rotationSpeed;
+            } else {
+              // Rotate around X axis (pitch)
+              rotationDelta.x -= rotationSpeed;
+              targetRotation.x -= rotationSpeed;
+            }
+            break;
+          case 'ArrowLeft':
+            if (isAltPressed) {
+              // Rotate around V axis when Alt is pressed
+              rotationDelta.v += rotationSpeed;
+              targetRotation.v += rotationSpeed;
+            } else {
+              // Rotate around Y axis (yaw)
+              rotationDelta.y += rotationSpeed;
+              targetRotation.y += rotationSpeed;
+              rotationPhase += rotationSpeed;
+            }
+            break;
+          case 'ArrowRight':
+            if (isAltPressed) {
+              // Rotate around V axis when Alt is pressed
+              rotationDelta.v -= rotationSpeed;
+              targetRotation.v -= rotationSpeed;
+            } else {
+              // Rotate around Y axis (yaw)
+              rotationDelta.y -= rotationSpeed;
+              targetRotation.y -= rotationSpeed;
+              rotationPhase -= rotationSpeed;
+            }
+            break;
+          case 'PageUp':
+          case 'Home':
+            // Increase dimension projection (move "up" in higher dimensions)
+            dimensionProjection = Math.min(dimensionProjection + dimensionChangeSpeed, 1.0);
+            updateDimensionProjection();
+            break;
+          case 'PageDown':
+          case 'End':
+            // Decrease dimension projection (move "down" in higher dimensions)
+            dimensionProjection = Math.max(dimensionProjection - dimensionChangeSpeed, 0.1);
+            updateDimensionProjection();
+            break;
+          case 'w':
+          case 'W':
+            // Rotate through W dimension (4D)
+            if (dimensionMode !== 'all') {
+              const dimensions = ['3D', '4D', '5D', '6D', '7D', '8D', '9D', '10D', 'all'];
+              const currentIndex = dimensions.indexOf(dimensionMode);
+              const nextIndex = (currentIndex + 1) % dimensions.length;
+              appStore.setDimensionMode(dimensions[nextIndex] as DimensionMode);
+            }
+            break;
+          case 's':
+          case 'S':
+            // Rotate through V dimension (5D)
+            if (dimensionMode !== '3D') {
+              const dimensions = ['3D', '4D', '5D', '6D', '7D', '8D', '9D', '10D', 'all'];
+              const currentIndex = dimensions.indexOf(dimensionMode);
+              const prevIndex = (currentIndex - 1 + dimensions.length) % dimensions.length;
+              appStore.setDimensionMode(dimensions[prevIndex] as DimensionMode);
+            }
+            break;
+          case 'z':
+          case 'Z':
+            // Rotate around Z axis (roll)
+            rotationDelta.z += rotationSpeed;
+            targetRotation.z += rotationSpeed;
+            break;
+          case 'x':
+          case 'X':
+            // Rotate around Z axis (roll)
+            rotationDelta.z -= rotationSpeed;
+            targetRotation.z -= rotationSpeed;
+            break;
+        }
+      }
+    };
+    
+    // Add event listener for key controls
+    window.addEventListener('keydown', keyHandler);
+    
+    // Add event listeners for mouse interaction
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('wheel', handleMouseWheel, { passive: false });
     
     // Start animation loop
     animate();
   });
+
+  // Update controls based on play state
+  $: if (controls) {
+    // When not playing, make manual rotation much easier
+    if (!isPlaying) {
+      // Disable camera rotation when not playing
+      controls.enabled = false;
+      
+      // Keep the camera fixed
+      if (camera) {
+        camera.position.set(0, 0, 5);
+        camera.lookAt(0, 0, 0);
+        camera.up.set(0, 1, 0);
+      }
+    } else {
+      // When playing, use default settings
+      controls.enabled = true;
+      controls.rotateSpeed = 0.5;
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.minDistance = 2;
+      controls.maxDistance = 20;
+    }
+    controls.update();
+  }
 
   // Animation loop
   function animate() {
@@ -823,16 +1781,59 @@
     if (animations.length > 0) {
       animations = [];
     }
+    
+    // Clear any pending timeouts
+    if (autoRotationToggleTimeout !== null) {
+      clearTimeout(autoRotationToggleTimeout);
+      autoRotationToggleTimeout = null;
+    }
+    
+    // Clear UI interaction timeout
+    if (uiInteractionTimeout !== null) {
+      clearTimeout(uiInteractionTimeout);
+      uiInteractionTimeout = null;
+    }
+    
+    // Remove keyboard event listener
+    if (keyHandler) {
+      window.removeEventListener('keydown', keyHandler);
+    }
+    
+    // Remove mouse event listeners
+    window.removeEventListener('mousedown', handleMouseDown);
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', handleMouseUp);
+    window.removeEventListener('mouseleave', handleMouseLeave);
+    window.removeEventListener('wheel', handleMouseWheel);
   });
 </script>
 
 <div class="scene-container">
   <!-- This is just a container for the Three.js scene -->
   <!-- Using the props in a way Svelte can track -->
-  {#if camera && controls}
-    <div class="debug-info">
-      Camera position: {camera.position.x.toFixed(2)}, {camera.position.y.toFixed(2)}, {camera.position.z.toFixed(2)}
-      Controls enabled: {controls.enabled}
+  {#if cameraPosition && controlsEnabled}
+    <button 
+      class="interaction-area"
+      on:mousedown={handleMouseDown}
+      on:mousemove={handleMouseMove}
+      on:mouseup={handleMouseUp}
+      on:mouseleave={handleMouseLeave}
+      on:wheel={handleMouseWheel}
+      aria-label="3D Scene Interaction Area">
+    </button>
+    <div class="debug-info ui-element">
+      Camera position: {cameraPosition.x.toFixed(2)}, {cameraPosition.y.toFixed(2)}, {cameraPosition.z.toFixed(2)}
+      Controls enabled: {controlsEnabled}
+      <br>
+      Dimension Mode: {dimensionMode} | Projection: {dimensionProjection.toFixed(2)} | Rotation Phase: {rotationPhase.toFixed(2)}
+      <br>
+      Manual Controls: {!isPlaying ? 'Enabled' : 'Disabled'} | Press W/S for dimension cycling, Arrow keys for rotation
+      <br>
+      Mouse: Click and drag to rotate, Mouse wheel for Z-axis rotation, Up/Down to change dimension projection
+      <br>
+      Controls: Arrow keys (X/Y rotation), Z/X (Z rotation), PageUp/PageDown (dimension)
+      <br>
+      Alt + Arrow keys: Rotate W/V axes | Alt + Mouse wheel: Rotate W axis
     </div>
   {/if}
 </div>
@@ -847,6 +1848,22 @@
     overflow: hidden;
   }
   
+  .interaction-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    border: none;
+    cursor: grab;
+    z-index: 10;
+  }
+  
+  .interaction-area:active {
+    cursor: grabbing;
+  }
+  
   .debug-info {
     position: absolute;
     bottom: 10px;
@@ -854,5 +1871,14 @@
     color: white;
     font-size: 12px;
     opacity: 0.5;
+    z-index: 20;
+    pointer-events: none; /* Make it non-interactive by default */
+  }
+  
+  /* Add class for UI elements to mark them as non-interactive for rotation */
+  .ui-element {
+    position: relative;
+    z-index: 30; /* Higher than the interaction area */
+    pointer-events: auto; /* Make it interactive */
   }
 </style> 

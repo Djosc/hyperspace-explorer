@@ -3,7 +3,7 @@ import * as THREE from 'three';
 /**
  * Color mode types for post-processing effects
  */
-export type ColorMode = 'spectralShift' | 'kaleidoscope' | 'both' | 'hyperspace';
+export type ColorMode = 'spectralShift' | 'kaleidoscope' | 'both' | 'hyperspace' | 'mathematical' | 'soundResonance' | 'fractal' | 'quantumField';
 
 /**
  * Effect types for post-processing
@@ -29,7 +29,13 @@ export type GeometryType =
   | 'hyper7D'
   | 'hyper8D'
   | 'hyper9D'
-  | 'hyper10D';
+  | 'hyper10D'
+  | 'hopfFibration'
+  | 'goldenSpiral'
+  | 'piSpiral'
+  | 'kleinBottle'
+  | 'mobiusStrip'
+  | 'torusKnot';
 
 /**
  * Dimension exploration modes

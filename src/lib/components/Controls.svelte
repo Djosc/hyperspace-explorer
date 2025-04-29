@@ -19,14 +19,21 @@
     'hyper7D',
     'hyper8D',
     'hyper9D',
-    'hyper10D'
+    'hyper10D',
+    'hopfFibration',
+    'goldenSpiral',
+    'piSpiral',
+    'kleinBottle',
+    'mobiusStrip',
+    'torusKnot'
   ];
   
   const colorModes: ColorMode[] = [
     'spectralShift', 
     'kaleidoscope', 
     'both', 
-    'hyperspace'
+    'hyperspace',
+    'mathematical'
   ];
 
   const dimensionModes: DimensionMode[] = [

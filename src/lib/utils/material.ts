@@ -625,9 +625,51 @@ export function createQuantumFieldMaterial(): THREE.Material {
   });
 }
 
+// Create mathematical material with special effects for mathematical forms
+export function createMathematicalMaterial(): THREE.Material {
+  const vertexShader = `
+    varying vec3 vPosition;
+    void main() {
+      vPosition = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  const fragmentShader = `
+    varying vec3 vPosition;
+    
+    vec3 hsv2rgb(vec3 c) {
+      vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+      vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+      return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    }
+
+    void main() {
+      // Calculate mathematical color based on position
+      float x = vPosition.x;
+      float y = vPosition.y;
+      float z = vPosition.z;
+      
+      // Use mathematical functions to create interesting patterns
+      float hue = abs(sin(x * 3.0) * cos(y * 3.0) * sin(z * 3.0));
+      float saturation = 0.8;
+      float value = 0.9;
+      
+      vec3 color = hsv2rgb(vec3(hue, saturation, value));
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `;
+
+  return new THREE.ShaderMaterial({
+    vertexShader,
+    fragmentShader,
+    side: THREE.DoubleSide
+  });
+}
+
 // Main material creation function
-export function createMaterial(type: ColorMode): THREE.Material {
-  switch (type) {
+export function createMaterial(colorMode: ColorMode): THREE.Material {
+  switch (colorMode) {
     case 'spectralShift':
       return createSpectralShiftMaterial();
     case 'kaleidoscope':
@@ -636,8 +678,15 @@ export function createMaterial(type: ColorMode): THREE.Material {
       return createCombinedMaterial();
     case 'hyperspace':
       return createHyperspaceMaterial();
+    case 'mathematical':
+      return createMathematicalMaterial();
+    case 'soundResonance':
+      return createSoundResonanceMaterial();
+    case 'fractal':
+      return createFractalMaterial();
+    case 'quantumField':
+      return createQuantumFieldMaterial();
     default:
-      console.warn(`Unknown color mode: ${type}, falling back to spectralShift`);
       return createSpectralShiftMaterial();
   }
 } 

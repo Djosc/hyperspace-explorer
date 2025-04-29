@@ -1,5 +1,13 @@
 import * as THREE from 'three';
 import type { GeometryType } from '../types';
+import {
+  createHopfFibration,
+  createGoldenSpiral,
+  createPiSpiral,
+  createKleinBottle,
+  createMobiusStrip,
+  createTorusKnot
+} from './mathGeometry';
 
 // Helper function to count bits
 function countBits(n: number): number {
@@ -17,6 +25,7 @@ function createHyperCube(complexity: number): THREE.BufferGeometry {
   const vertices = [];
   const indices = [];
   const uvs = [];
+  const normals = [];
   const size = 2;
 
   // Generate vertices for a 4D hypercube projection
@@ -34,14 +43,36 @@ function createHyperCube(complexity: number): THREE.BufferGeometry {
       z * scale
     );
     
-    // Add UV coordinates
+    // Add UV coordinates based on position
     uvs.push(
       (x + size) / (2 * size),
       (y + size) / (2 * size)
     );
+
+    // Add normals for proper lighting
+    const normal = new THREE.Vector3(x, y, z).normalize();
+    normals.push(normal.x, normal.y, normal.z);
   }
 
-  // Generate indices for edges
+  // Generate faces (triangles) for each cube face
+  const faceIndices = [
+    [0, 1, 2, 3], // front face
+    [4, 5, 6, 7], // back face
+    [0, 1, 5, 4], // top face
+    [2, 3, 7, 6], // bottom face
+    [0, 3, 7, 4], // left face
+    [1, 2, 6, 5]  // right face
+  ];
+
+  // Create triangles for each face
+  faceIndices.forEach(face => {
+    // First triangle
+    indices.push(face[0], face[1], face[2]);
+    // Second triangle
+    indices.push(face[0], face[2], face[3]);
+  });
+
+  // Add edges for wireframe effect
   for (let i = 0; i < vertices.length / 3; i++) {
     for (let j = i + 1; j < vertices.length / 3; j++) {
       if (countBits(i ^ j) === 1) {
@@ -52,6 +83,7 @@ function createHyperCube(complexity: number): THREE.BufferGeometry {
 
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
 
@@ -254,6 +286,7 @@ function createTesseract(complexity: number): THREE.BufferGeometry {
   const vertices = [];
   const indices = [];
   const uvs = [];
+  const normals = [];
   const size = 2;
   const segments = Math.max(2, complexity);
 
@@ -272,11 +305,15 @@ function createTesseract(complexity: number): THREE.BufferGeometry {
       z * scale
     );
     
-    // Add UV coordinates
+    // Add UV coordinates based on position
     uvs.push(
       (x + size) / (2 * size),
       (y + size) / (2 * size)
     );
+
+    // Add normals for proper lighting
+    const normal = new THREE.Vector3(x, y, z).normalize();
+    normals.push(normal.x, normal.y, normal.z);
   }
 
   // Add internal vertices for more complexity
@@ -301,11 +338,33 @@ function createTesseract(complexity: number): THREE.BufferGeometry {
           (x + size) / (2 * size),
           (y + size) / (2 * size)
         );
+
+        // Add normals
+        const normal = new THREE.Vector3(x, y, z).normalize();
+        normals.push(normal.x, normal.y, normal.z);
       }
     }
   }
 
-  // Generate indices for edges
+  // Generate faces for the outer cube
+  const faceIndices = [
+    [0, 1, 2, 3], // front face
+    [4, 5, 6, 7], // back face
+    [0, 1, 5, 4], // top face
+    [2, 3, 7, 6], // bottom face
+    [0, 3, 7, 4], // left face
+    [1, 2, 6, 5]  // right face
+  ];
+
+  // Create triangles for each face
+  faceIndices.forEach(face => {
+    // First triangle
+    indices.push(face[0], face[1], face[2]);
+    // Second triangle
+    indices.push(face[0], face[2], face[3]);
+  });
+
+  // Add edges for wireframe effect
   for (let i = 0; i < vertices.length / 3; i++) {
     for (let j = i + 1; j < vertices.length / 3; j++) {
       if (countBits(i ^ j) === 1 || Math.random() < 0.1) {
@@ -316,6 +375,7 @@ function createTesseract(complexity: number): THREE.BufferGeometry {
 
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
 
@@ -904,11 +964,7 @@ function create10DHyperCube(complexity: number): THREE.BufferGeometry {
 }
 
 // Main geometry creation function
-export function createGeometry(
-  type: GeometryType,
-  complexity: number,
-  symmetry: number
-): THREE.BufferGeometry {
+export function createGeometry(type: GeometryType, complexity: number = 5, symmetry: number = 8): THREE.BufferGeometry {
   switch (type) {
     case 'hyperCube':
       return createHyperCube(complexity);
@@ -942,6 +998,18 @@ export function createGeometry(
       return create9DHyperCube(complexity);
     case 'hyper10D':
       return create10DHyperCube(complexity);
+    case 'hopfFibration':
+      return createHopfFibration(complexity);
+    case 'goldenSpiral':
+      return createGoldenSpiral(complexity);
+    case 'piSpiral':
+      return createPiSpiral(complexity * 20); // Scale up for more digits
+    case 'kleinBottle':
+      return createKleinBottle(complexity * 4); // Scale up for smoother surface
+    case 'mobiusStrip':
+      return createMobiusStrip(complexity * 16); // Scale up for smoother surface
+    case 'torusKnot':
+      return createTorusKnot(complexity % 5 + 2, symmetry % 4 + 2); // Use complexity and symmetry for p,q values
     default:
       console.warn(`Unknown geometry type: ${type}, falling back to hyperCube`);
       return createHyperCube(complexity);
