@@ -2,6 +2,8 @@
 
 An interactive visualization tool for exploring higher-dimensional spaces and mathematical concepts using Three.js and Svelte.
 
+![HyperSpace Explorer Screenshot](docs/media/screenshot.png)
+
 ## Features
 
 - **Higher Dimensional Visualization**: Explore geometries from 3D up to 10D with intuitive projections
@@ -31,6 +33,12 @@ An interactive visualization tool for exploring higher-dimensional spaces and ma
   - Mathematical annotations
   - Edge glow effects
 
+## Demo
+
+[![HyperSpace Explorer Demo](docs/media/demo-thumbnail.png)](docs/media/demo.mp4)
+
+*Click the image above to watch a short demonstration of HyperSpace Explorer*
+
 ## Recent Updates
 
 - Added quaternion-based animation system
@@ -38,6 +46,7 @@ An interactive visualization tool for exploring higher-dimensional spaces and ma
 - Enhanced shader materials with improved color handling
 - Added dimension-specific visual parameters
 - Improved performance with optimized animation loop
+- Improved mouse rotation controls and fixed auto-rotation toggling
 
 ## Setup
 
