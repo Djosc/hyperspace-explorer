@@ -81,8 +81,10 @@
 
   // Add debounce mechanism for auto-rotation toggle
   let lastToggleTime = 0;
-  const TOGGLE_DEBOUNCE_TIME = 1000; // 1 second debounce
+  const TOGGLE_DEBOUNCE_TIME = 500; // Reduced to 500ms for more responsive toggling
   let autoRotationToggleTimeout: number | null = null; // Track timeout for auto-rotation toggle
+  let lastInteractionTime = 0; // Track the last time user interacted with the scene
+  const MIN_INTERACTION_INTERVAL = 200; // Reduced to 200ms for more responsive interactions
 
   // Add mouse interaction variables
   let isDragging = false;
@@ -92,7 +94,7 @@
   let wasAutoRotating = false; // Track if auto-rotation was enabled before manual control
   let manualRotationActive = false; // Track if manual rotation is currently active
   let lastMouseInteractionTime = 0; // Track the last time mouse interaction occurred
-  const MOUSE_DEBOUNCE_TIME = 500; // 500ms debounce for mouse interactions
+  const MOUSE_DEBOUNCE_TIME = 200; // Reduced to 200ms for more responsive mouse interactions
   
   // Add rotation interpolation variables
   let targetRotation = { x: 0, y: 0, z: 0, w: 0, v: 0 }; // Added w and v for higher dimensions
@@ -107,6 +109,11 @@
   
   // Add UI element tracking
   let uiElements: HTMLElement[] = []; // Track UI elements that should be excluded from rotation
+
+  // Add zoom control variables
+  let zoomSpeed = 0.1; // Speed for zooming
+  let minFOV = 30; // Minimum field of view (zoomed in)
+  let maxFOV = 90; // Maximum field of view (zoomed out)
 
   // Function to safely toggle auto-rotation with debounce
   function safeToggleAutoRotation(enable: boolean) {
@@ -137,80 +144,71 @@
     }
   }
 
-  // Function to safely pause auto-rotation
+  // Function to pause auto-rotation
   function pauseAutoRotation() {
-    // Only pause if auto-rotation is currently active
+    // Don't pause auto-rotation if we're interacting with UI
+    if (isInteractingWithUI) {
+      console.log('Ignoring pause request - UI interaction active');
+      return;
+    }
+    
     if ($appStore.autoRotateDimensions) {
-      console.log('Pausing auto-rotation');
-      wasAutoRotating = true;
-      manualRotationActive = true;
-      
-      // Clear any existing timeout to prevent race conditions
-      if (autoRotationToggleTimeout !== null) {
-        clearTimeout(autoRotationToggleTimeout);
-        autoRotationToggleTimeout = null;
+      const currentTime = Date.now();
+      if (currentTime - lastInteractionTime > MIN_INTERACTION_INTERVAL) {
+        console.log('Pausing auto-rotation');
+        // Store current rotation state before toggling
+        const currentRotationState = {
+          x: mesh?.rotation.x || 0,
+          y: mesh?.rotation.y || 0,
+          z: mesh?.rotation.z || 0,
+          w: currentRotation.w,
+          v: currentRotation.v
+        };
+        
+        // Toggle auto-rotation off
+        appStore.toggleDimensionRotation();
+        lastInteractionTime = currentTime;
+        
+        // Preserve the current rotation
+        targetRotation = { ...currentRotationState };
+        currentRotation = { ...currentRotationState };
+        rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
+        wasAutoRotating = true;
       }
-      
-      // Store current rotation state before toggling
-      const currentRotationState = {
-        x: mesh?.rotation.x || 0,
-        y: mesh?.rotation.y || 0,
-        z: mesh?.rotation.z || 0,
-        w: currentRotation.w,
-        v: currentRotation.v
-      };
-      
-      // Toggle auto-rotation off
-      appStore.toggleDimensionRotation();
-      lastToggleTime = Date.now();
-      
-      // Preserve the current rotation
-      targetRotation = { ...currentRotationState };
-      currentRotation = { ...currentRotationState };
-      rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
     }
   }
 
-  // Function to safely resume auto-rotation
+  // Function to resume auto-rotation
   function resumeAutoRotation() {
-    // Only resume if we previously paused it
-    if (wasAutoRotating && manualRotationActive) {
-      console.log('Will resume auto-rotation after delay');
-      manualRotationActive = false;
-      
-      // Clear any existing timeout to prevent race conditions
-      if (autoRotationToggleTimeout !== null) {
-        clearTimeout(autoRotationToggleTimeout);
+    // Don't resume auto-rotation if we're interacting with UI
+    if (isInteractingWithUI) {
+      console.log('Ignoring resume request - UI interaction active');
+      return;
+    }
+    
+    if (!$appStore.autoRotateDimensions && wasAutoRotating) {
+      const currentTime = Date.now();
+      if (currentTime - lastToggleTime > TOGGLE_DEBOUNCE_TIME) {
+        console.log('Resuming auto-rotation');
+        // Store current rotation state before toggling
+        const currentRotationState = {
+          x: mesh?.rotation.x || 0,
+          y: mesh?.rotation.y || 0,
+          z: mesh?.rotation.z || 0,
+          w: currentRotation.w,
+          v: currentRotation.v
+        };
+        
+        // Toggle auto-rotation on
+        appStore.toggleDimensionRotation();
+        lastToggleTime = currentTime;
+        
+        // Preserve the current rotation
+        targetRotation = { ...currentRotationState };
+        currentRotation = { ...currentRotationState };
+        rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
       }
-      
-      // Set a new timeout to resume auto-rotation
-      autoRotationToggleTimeout = window.setTimeout(() => {
-        if (wasAutoRotating) {
-          console.log('Resuming auto-rotation');
-          // Check if enough time has passed since last toggle
-          const currentTime = Date.now();
-          if (currentTime - lastToggleTime > TOGGLE_DEBOUNCE_TIME) {
-            // Store current rotation state before toggling
-            const currentRotationState = {
-              x: mesh?.rotation.x || 0,
-              y: mesh?.rotation.y || 0,
-              z: mesh?.rotation.z || 0,
-              w: currentRotation.w,
-              v: currentRotation.v
-            };
-            
-            // Toggle auto-rotation on
-            appStore.toggleDimensionRotation();
-            lastToggleTime = currentTime;
-            
-            // Preserve the current rotation
-            targetRotation = { ...currentRotationState };
-            currentRotation = { ...currentRotationState };
-            rotationDelta = { x: 0, y: 0, z: 0, w: 0, v: 0 };
-          }
-          wasAutoRotating = false;
-        }
-      }, 1000); // Resume after 1 second
+      wasAutoRotating = false;
     }
   }
 
@@ -452,7 +450,7 @@
               // Create a more sophisticated regrowth animation with intermediate steps
               // First, fade in the new mesh
               if ('uniforms' in newMaterial && newMaterial.uniforms) {
-                const uniforms = newMaterial.uniforms as {
+                    const uniforms = newMaterial.uniforms as {
                   opacity?: { value: number };
                 };
                 if (uniforms.opacity) {
@@ -461,8 +459,8 @@
                     duration: 0.3,
                     ease: "power2.inOut"
                   }, "<");
-                }
-              }
+                    }
+                  }
               
               // Two-stage growth animation
               timeline.to(mesh.scale, {
@@ -470,7 +468,7 @@
                 y: 0.4,
                 z: 0.4,
                 duration: expandDuration * 0.4,
-                ease: "power2.out"
+                  ease: "power2.out"
               }, "<");
               
               // Brief pause at intermediate size
@@ -480,9 +478,9 @@
               
               // Second growth stage (0.4 -> 1.0)
               timeline.to(mesh.scale, {
-                x: 1,
-                y: 1,
-                z: 1,
+                  x: 1,
+                  y: 1,
+                  z: 1,
                 duration: expandDuration * 0.5,
                 ease: "elastic.out(1, 0.3)",
                 onComplete: () => {
@@ -495,7 +493,7 @@
                     isTransitioning = false;
                   }, 500); // 500ms pause before resuming auto-rotation
                 }
-              });
+                });
             }
           });
         }
@@ -1402,7 +1400,10 @@
                         target.closest('button') || 
                         target.closest('a') ||
                         target.closest('.controls') ||
-                        target.closest('.debug-info');
+                        target.closest('.debug-info') ||
+                        target.closest('input') ||
+                        target.closest('select') ||
+                        target.closest('label');
     
     if (isUIElement) {
       console.log('UI element clicked, ignoring for rotation');
@@ -1476,6 +1477,28 @@
     // Prevent default scrolling behavior
     event.preventDefault();
     
+    // Check if Ctrl key is pressed for zooming
+    if (event.ctrlKey) {
+      // Use wheel delta for zooming
+      const zoomDelta = event.deltaY * 0.01;
+      
+      // Update camera FOV for zooming
+      if (camera) {
+        // Adjust FOV based on wheel direction
+        const newFOV = camera.fov + zoomDelta * zoomSpeed * 10;
+        
+        // Clamp FOV between min and max values
+        camera.fov = Math.max(minFOV, Math.min(maxFOV, newFOV));
+        
+        // Update camera projection matrix
+        camera.updateProjectionMatrix();
+        
+        console.log(`Zooming: FOV = ${camera.fov.toFixed(2)}`);
+      }
+      
+      return; // Exit early to prevent other wheel actions
+    }
+    
     // Use wheel delta for Z-axis rotation
     const wheelDelta = event.deltaY * 0.001;
     
@@ -1524,6 +1547,10 @@
     if (camera) {
       camera.position.set(0, 0, 5);
       camera.lookAt(scene.position);
+      
+      // Set initial FOV
+      camera.fov = 75;
+      camera.updateProjectionMatrix();
     }
     
     // Configure OrbitControls for better interaction
@@ -1596,7 +1623,7 @@
         const isRotationKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'z', 'Z', 'x', 'X'].includes(event.key);
         
         // Pause auto-rotation when manual control starts
-        if (isRotationKey && $appStore.autoRotateDimensions) {
+        if (isRotationKey && $appStore.autoRotateDimensions && !isInteractingWithUI) {
           pauseAutoRotation();
           
           // Resume auto-rotation after a delay
@@ -1834,6 +1861,8 @@
       Controls: Arrow keys (X/Y rotation), Z/X (Z rotation), PageUp/PageDown (dimension)
       <br>
       Alt + Arrow keys: Rotate W/V axes | Alt + Mouse wheel: Rotate W axis
+      <br>
+      Ctrl + Mouse wheel: Zoom in/out
     </div>
   {/if}
 </div>
