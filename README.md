@@ -41,6 +41,13 @@ An interactive visualization tool for exploring higher-dimensional spaces and ma
   - Edge glow effects
   - Advanced shader-based effects
 
+## Screenshots
+
+<div align="center">
+  <img src="docs/screenshots/hypercube-4d-view.png" alt="4D Hypercube Visualization" width="45%"/>
+  <img src="docs/screenshots/mandala-pattern-view.png" alt="Mandala Pattern Visualization" width="45%"/>
+</div>
+
 ## Demo
 
 [![HyperSpace Explorer Demo](docs/media/demo-thumbnail.png)](docs/media/demo.mp4)
