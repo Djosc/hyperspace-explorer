@@ -1,8 +1,18 @@
 import * as THREE from 'three';
 import type { ColorMode } from '../types';
 
+// Define material uniforms type
+interface MaterialUniforms {
+  color?: { value: THREE.Color };
+  opacity?: { value: number };
+  shininess?: { value: number };
+  time?: { value: number };
+  fuzziness?: { value: number };
+  [key: string]: { value: any } | undefined;
+}
+
 // Create spectral shift material
-export function createSpectralShiftMaterial(): THREE.Material {
+export function createSpectralShiftMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -55,11 +65,11 @@ export function createSpectralShiftMaterial(): THREE.Material {
         gl_FragColor = vec4(color * 0.5 + 0.5, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create kaleidoscope material
-export function createKaleidoscopeMaterial(): THREE.Material {
+export function createKaleidoscopeMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -111,11 +121,11 @@ export function createKaleidoscopeMaterial(): THREE.Material {
         gl_FragColor = vec4(color, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create combined material
-export function createCombinedMaterial(): THREE.Material {
+export function createCombinedMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -191,11 +201,11 @@ export function createCombinedMaterial(): THREE.Material {
         gl_FragColor = vec4(finalColor * 0.5 + 0.5, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create hyperspace material with dimension-based colors
-export function createHyperspaceMaterial(): THREE.Material {
+export function createHyperspaceMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -303,11 +313,11 @@ export function createHyperspaceMaterial(): THREE.Material {
         gl_FragColor = vec4(finalColor, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create quantum material
-export function createQuantumMaterial(): THREE.Material {
+export function createQuantumMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -392,11 +402,11 @@ export function createQuantumMaterial(): THREE.Material {
         gl_FragColor = vec4(baseColor * 0.5 + 0.5, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create sound resonance material
-export function createSoundResonanceMaterial(): THREE.Material {
+export function createSoundResonanceMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -463,11 +473,11 @@ export function createSoundResonanceMaterial(): THREE.Material {
         gl_FragColor = vec4(waveColor * 0.5 + 0.5, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create fractal material
-export function createFractalMaterial(): THREE.Material {
+export function createFractalMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -542,11 +552,11 @@ export function createFractalMaterial(): THREE.Material {
         gl_FragColor = vec4(fractalColor, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create quantum field material
-export function createQuantumFieldMaterial(): THREE.Material {
+export function createQuantumFieldMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
@@ -622,11 +632,11 @@ export function createQuantumFieldMaterial(): THREE.Material {
         gl_FragColor = vec4(fieldColor, 1.0);
       }
     `
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Create mathematical material with special effects for mathematical forms
-export function createMathematicalMaterial(): THREE.Material {
+export function createMathematicalMaterial(): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   const vertexShader = `
     varying vec3 vPosition;
     void main() {
@@ -664,11 +674,11 @@ export function createMathematicalMaterial(): THREE.Material {
     vertexShader,
     fragmentShader,
     side: THREE.DoubleSide
-  });
+  }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
 // Main material creation function
-export function createMaterial(colorMode: ColorMode): THREE.Material {
+export function createMaterial(colorMode: ColorMode): THREE.ShaderMaterial & { uniforms: MaterialUniforms } {
   switch (colorMode) {
     case 'spectralShift':
       return createSpectralShiftMaterial();

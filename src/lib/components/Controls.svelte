@@ -60,9 +60,13 @@
   export let dimensionMode = '3D';
   export let dimensionRotationSpeed = 1.0;
   export let autoRotateDimensions = false;
+  export let isTransitioning = false;
   
   // Event dispatcher
   const dispatch = createEventDispatcher();
+
+  // Add state for advanced controls
+  let showAdvanced = false;
 
   function handleGeometryTypeChange(event: Event) {
     const select = event.target as HTMLSelectElement;
@@ -97,43 +101,48 @@
     appStore.setDimensionMode(value);
   }
 
-  function handleComplexityChange(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const value = parseInt(input.value);
-    if (isNaN(value) || value < 1 || value > 10) {
-      console.error('Invalid complexity value');
-      return;
+  function handleInputChange(event: Event, param: string) {
+    const target = event.currentTarget as HTMLInputElement;
+    if (!target) return;
+    
+    const value = target.type === 'checkbox' 
+      ? target.checked 
+      : parseFloat(target.value);
+    
+    console.log(`Input change for ${param}:`, value);
+    
+    switch(param) {
+      case 'complexity':
+        appStore.setComplexity(parseInt(target.value));
+        break;
+      case 'symmetry':
+        appStore.setSymmetry(parseInt(target.value));
+        break;
+      case 'speed':
+        appStore.setSpeed(parseFloat(target.value));
+        break;
+      default:
+        dispatch(`${param}Change`, value);
     }
-    console.log(`Changing complexity to: ${value}`);
-    appStore.setComplexity(value);
   }
-
-  function handleSymmetryChange(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const value = parseInt(input.value);
-    if (isNaN(value) || value < 3 || value > 12) {
-      console.error('Invalid symmetry value');
-      return;
-    }
-    console.log(`Changing symmetry to: ${value}`);
-    appStore.setSymmetry(value);
-  }
-
-  function handleSpeedChange(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const value = parseFloat(input.value);
-    if (isNaN(value) || value < 0.1 || value > 5) {
-      console.error('Invalid speed value');
-      return;
-    }
-    console.log(`Changing speed to: ${value}`);
-    appStore.setSpeed(value);
+  
+  function handleSelectChange(event: Event, param: string) {
+    const target = event.target as HTMLSelectElement;
+    if (!target) return;
+    
+    console.log(`Select change for ${param}:`, target.value);
+    dispatch(`${param}Change`, target.value);
   }
 
   function togglePlayPause() {
     const newState = !$appStore.isPlaying;
     console.log(`Toggling play/pause to: ${newState ? 'play' : 'pause'}`);
     appStore.togglePlay();
+    
+    // If we're pausing, also stop rotation
+    if (!newState && $appStore.autoRotateDimensions) {
+      appStore.toggleDimensionRotation();
+    }
   }
 
   function toggleAnnotations() {
@@ -143,7 +152,10 @@
 
   function toggleDimensionRotation() {
     console.log('Toggling dimension rotation');
-    appStore.toggleDimensionRotation();
+    // Only allow rotation if we're in play mode
+    if ($appStore.isPlaying) {
+      appStore.toggleDimensionRotation();
+    }
   }
   
   // Format the display name for geometry types and color modes
@@ -154,21 +166,6 @@
       .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
       .trim();
   }
-
-  // Handle input changes
-  function handleInputChange(event, param) {
-    const value = event.target.type === 'checkbox' 
-      ? event.target.checked 
-      : parseFloat(event.target.value);
-    
-    console.log(`Input change for ${param}:`, value);
-    dispatch(`${param}Change`, value);
-  }
-  
-  function handleSelectChange(event, param) {
-    console.log(`Select change for ${param}:`, event.target.value);
-    dispatch(`${param}Change`, event.target.value);
-  }
 </script>
 
 <div class="controls">
@@ -176,7 +173,7 @@
   
   <div class="control-group">
     <label for="geometry-type">Geometry Type</label>
-    <select id="geometry-type" on:change={handleGeometryTypeChange}>
+    <select id="geometry-type" on:change={handleGeometryTypeChange} class:changing={isTransitioning}>
       {#each geometryTypes as type}
         <option value={type} selected={$appStore.geometryType === type}>
           {formatDisplayName(type)}
@@ -186,8 +183,36 @@
   </div>
 
   <div class="control-group">
+    <label for="complexity">Complexity</label>
+    <input 
+      type="range" 
+      id="complexity" 
+      min="1" 
+      max="10" 
+      value={$appStore.complexity} 
+      on:input={(e) => handleInputChange(e, 'complexity')}
+      class:changing={isTransitioning}
+    />
+    <div class="value-display">{$appStore.complexity}</div>
+  </div>
+
+  <div class="control-group">
+    <label for="symmetry">Symmetry</label>
+    <input 
+      type="range" 
+      id="symmetry" 
+      min="1" 
+      max="10" 
+      value={$appStore.symmetry} 
+      on:input={(e) => handleInputChange(e, 'symmetry')}
+      class:changing={isTransitioning}
+    />
+    <div class="value-display">{$appStore.symmetry}</div>
+  </div>
+
+  <div class="control-group">
     <label for="color-mode">Color Mode</label>
-    <select id="color-mode" on:change={handleColorModeChange}>
+    <select id="color-mode" on:change={handleColorModeChange} class:changing={isTransitioning}>
       {#each colorModes as mode}
         <option value={mode} selected={$appStore.colorMode === mode}>
           {formatDisplayName(mode)}
@@ -198,69 +223,160 @@
 
   <div class="control-group">
     <label for="dimension-mode">Dimension Mode</label>
-    <select id="dimension-mode" on:change={(e) => handleSelectChange(e, 'dimensionMode')}>
+    <select id="dimension-mode" on:change={handleDimensionModeChange} class:changing={isTransitioning}>
       {#each dimensionModes as mode}
         <option value={mode} selected={$appStore.dimensionMode === mode}>
-          {mode}
+          {formatDisplayName(mode)}
         </option>
       {/each}
     </select>
   </div>
 
   <div class="control-group">
-    <label for="complexity">Complexity: {$appStore.complexity}</label>
-    <input
-      type="range"
-      id="complexity"
-      min="1"
-      max="10"
-      value={$appStore.complexity}
-      on:input={handleComplexityChange}
+    <label for="speed">Animation Speed</label>
+    <input 
+      type="range" 
+      id="speed" 
+      min="0.1" 
+      max="2" 
+      step="0.1" 
+      value={$appStore.speed} 
+      on:input={(e) => handleInputChange(e, 'speed')}
+      class:changing={isTransitioning}
     />
+    <div class="value-display">{$appStore.speed.toFixed(1)}x</div>
   </div>
 
-  <div class="control-group">
-    <label for="symmetry">Symmetry: {$appStore.symmetry}</label>
-    <input
-      type="range"
-      id="symmetry"
-      min="2"
-      max="16"
-      value={$appStore.symmetry}
-      on:input={handleSymmetryChange}
-    />
-  </div>
-
-  <div class="control-group">
-    <label for="speed">Speed: {$appStore.speed.toFixed(1)}x</label>
-    <input
-      type="range"
-      id="speed"
-      min="0.1"
-      max="5"
-      step="0.1"
-      value={$appStore.speed}
-      on:input={handleSpeedChange}
-    />
-  </div>
-
-  <div class="button-group">
-    <button class="play-pause" on:click={togglePlayPause}>
-      {$appStore.isPlaying ? '⏸️ Pause' : '▶️ Play'}
+  <div class="buttons">
+    <button 
+      class="play-pause" 
+      on:click={togglePlayPause} 
+      class:playing={$appStore.isPlaying}
+      class:changing={isTransitioning}
+    >
+      {$appStore.isPlaying ? '⏸' : '▶'}
     </button>
+    <button 
+      class="annotations" 
+      on:click={toggleAnnotations} 
+      class:active={$appStore.showAnnotations}
+      class:changing={isTransitioning}
+    >
+      {$appStore.showAnnotations ? '👁' : '👁‍🗨'}
+    </button>
+    <button 
+      class="auto-rotate" 
+      on:click={toggleDimensionRotation} 
+      class:active={$appStore.autoRotateDimensions}
+      class:changing={isTransitioning}
+    >
+      {$appStore.autoRotateDimensions ? '⏹' : '🔄'}
+    </button>
+  </div>
+
+  <div class="control-group collapsible" class:collapsed={!showAdvanced}>
+    <label on:click={() => showAdvanced = !showAdvanced}>
+      Advanced Controls
+    </label>
     
-    <button class="annotations-toggle" on:click={toggleAnnotations}>
-      {$appStore.showAnnotations ? '🔍 Hide Annotations' : '🔍 Show Annotations'}
-    </button>
-    
-    <button class="dimension-rotation-toggle" on:click={toggleDimensionRotation}>
-      {$appStore.autoRotateDimensions ? '🔄 Stop Dimension Rotation' : '🔄 Start Dimension Rotation'}
-    </button>
+    {#if showAdvanced}
+      <div class="advanced-controls">
+        <div class="control-group">
+          <h3>Sound Resonance</h3>
+          <div class="control-row">
+            <label for="frequency">Frequency</label>
+            <input 
+              type="range" 
+              id="frequency" 
+              min="20" 
+              max="2000" 
+              step="1" 
+              value={frequency} 
+              on:input={(e) => handleInputChange(e, 'frequency')}
+            />
+            <span class="value-display">{frequency} Hz</span>
+          </div>
+          <div class="control-row">
+            <label for="amplitude">Amplitude</label>
+            <input 
+              type="range" 
+              id="amplitude" 
+              min="0" 
+              max="1" 
+              step="0.01" 
+              value={amplitude} 
+              on:input={(e) => handleInputChange(e, 'amplitude')}
+            />
+            <span class="value-display">{amplitude.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <h3>Fractal</h3>
+          <div class="control-row">
+            <label for="iteration">Iteration</label>
+            <input 
+              type="range" 
+              id="iteration" 
+              min="1" 
+              max="10" 
+              step="1" 
+              value={iteration} 
+              on:input={(e) => handleInputChange(e, 'iteration')}
+            />
+            <span class="value-display">{iteration}</span>
+          </div>
+          <div class="control-row">
+            <label for="glowIntensity">Glow</label>
+            <input 
+              type="range" 
+              id="glowIntensity" 
+              min="0" 
+              max="1" 
+              step="0.01" 
+              value={glowIntensity} 
+              on:input={(e) => handleInputChange(e, 'glowIntensity')}
+            />
+            <span class="value-display">{glowIntensity.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <h3>Quantum Field</h3>
+          <div class="control-row">
+            <label for="particleCount">Particles</label>
+            <input 
+              type="range" 
+              id="particleCount" 
+              min="10" 
+              max="1000" 
+              step="10" 
+              value={particleCount} 
+              on:input={(e) => handleInputChange(e, 'particleCount')}
+            />
+            <span class="value-display">{particleCount}</span>
+          </div>
+          <div class="control-row">
+            <label for="entanglement">Entanglement</label>
+            <input 
+              type="range" 
+              id="entanglement" 
+              min="0" 
+              max="1" 
+              step="0.01" 
+              value={entanglement} 
+              on:input={(e) => handleInputChange(e, 'entanglement')}
+            />
+            <span class="value-display">{entanglement.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+    {/if}
   </div>
-  
+
   <div class="info-text">
     <p>Explore higher dimensions through mathematical visualization</p>
-    <p class="dimension-info">
+    <div class="dimension-info">
       {#if $appStore.dimensionMode === '3D'}
         Exploring 3D projection of higher-dimensional objects
       {:else if $appStore.dimensionMode === '4D'}
@@ -280,323 +396,282 @@
       {:else}
         Exploring all dimensions simultaneously
       {/if}
-    </p>
-  </div>
-
-  <div class="control-group">
-    <h3>Dimension Controls</h3>
-    <div class="control-row">
-      <label for="dimensionMode">Dimension Mode:</label>
-      <select 
-        id="dimensionMode" 
-        value={dimensionMode} 
-        on:change={(e) => handleSelectChange(e, 'dimensionMode')}
-      >
-        {#each dimensionModes as option}
-          <option value={option}>{option}</option>
-        {/each}
-      </select>
-    </div>
-    <div class="control-row">
-      <label for="dimensionRotationSpeed">Rotation Speed:</label>
-      <input 
-        type="range" 
-        id="dimensionRotationSpeed" 
-        min="0" 
-        max="2" 
-        step="0.1" 
-        value={dimensionRotationSpeed} 
-        on:input={(e) => handleInputChange(e, 'dimensionRotationSpeed')}
-      />
-      <span class="value-display">{dimensionRotationSpeed.toFixed(1)}</span>
-    </div>
-    <div class="control-row">
-      <label for="autoRotateDimensions">Auto-Rotate Dimensions:</label>
-      <input 
-        type="checkbox" 
-        id="autoRotateDimensions" 
-        checked={autoRotateDimensions} 
-        on:change={(e) => handleInputChange(e, 'autoRotateDimensions')}
-      />
-    </div>
-  </div>
-  
-  <div class="control-group">
-    <h3>Sound Resonance</h3>
-    <div class="control-row">
-      <label for="frequency">Frequency (Hz):</label>
-      <input 
-        type="range" 
-        id="frequency" 
-        min="20" 
-        max="2000" 
-        step="1" 
-        value={frequency} 
-        on:input={(e) => handleInputChange(e, 'frequency')}
-      />
-      <span class="value-display">{frequency} Hz</span>
-    </div>
-    <div class="control-row">
-      <label for="amplitude">Amplitude:</label>
-      <input 
-        type="range" 
-        id="amplitude" 
-        min="0" 
-        max="1" 
-        step="0.01" 
-        value={amplitude} 
-        on:input={(e) => handleInputChange(e, 'amplitude')}
-      />
-      <span class="value-display">{amplitude.toFixed(2)}</span>
-    </div>
-    <div class="control-row">
-      <label for="resonance">Resonance:</label>
-      <input 
-        type="range" 
-        id="resonance" 
-        min="0" 
-        max="1" 
-        step="0.01" 
-        value={resonance} 
-        on:input={(e) => handleInputChange(e, 'resonance')}
-      />
-      <span class="value-display">{resonance.toFixed(2)}</span>
-    </div>
-  </div>
-  
-  <div class="control-group">
-    <h3>Fractal</h3>
-    <div class="control-row">
-      <label for="iteration">Iteration Level:</label>
-      <input 
-        type="range" 
-        id="iteration" 
-        min="1" 
-        max="10" 
-        step="1" 
-        value={iteration} 
-        on:input={(e) => handleInputChange(e, 'iteration')}
-      />
-      <span class="value-display">{iteration}</span>
-    </div>
-    <div class="control-row">
-      <label for="glowIntensity">Glow Intensity:</label>
-      <input 
-        type="range" 
-        id="glowIntensity" 
-        min="0" 
-        max="1" 
-        step="0.01" 
-        value={glowIntensity} 
-        on:input={(e) => handleInputChange(e, 'glowIntensity')}
-      />
-      <span class="value-display">{glowIntensity.toFixed(2)}</span>
-    </div>
-  </div>
-  
-  <div class="control-group">
-    <h3>Quantum Field</h3>
-    <div class="control-row">
-      <label for="particleCount">Particle Count:</label>
-      <input 
-        type="range" 
-        id="particleCount" 
-        min="10" 
-        max="1000" 
-        step="10" 
-        value={particleCount} 
-        on:input={(e) => handleInputChange(e, 'particleCount')}
-      />
-      <span class="value-display">{particleCount}</span>
-    </div>
-    <div class="control-row">
-      <label for="entanglement">Entanglement:</label>
-      <input 
-        type="range" 
-        id="entanglement" 
-        min="0" 
-        max="1" 
-        step="0.01" 
-        value={entanglement} 
-        on:input={(e) => handleInputChange(e, 'entanglement')}
-      />
-      <span class="value-display">{entanglement.toFixed(2)}</span>
-    </div>
-    <div class="control-row">
-      <label for="uncertainty">Uncertainty:</label>
-      <input 
-        type="range" 
-        id="uncertainty" 
-        min="0" 
-        max="1" 
-        step="0.01" 
-        value={uncertainty} 
-        on:input={(e) => handleInputChange(e, 'uncertainty')}
-      />
-      <span class="value-display">{uncertainty.toFixed(2)}</span>
     </div>
   </div>
 </div>
 
 <style>
   .controls {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background-color: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.85);
+    padding: 15px;
+    border-radius: 12px;
     color: white;
-    padding: 20px;
-    border-radius: 10px;
-    z-index: 1000;
-    width: 300px;
-    max-height: 90vh;
-    overflow-y: auto;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    width: 280px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
   h2 {
-    margin-top: 0;
-    text-align: center;
-    color: #00ffff;
+    margin: 0 0 15px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.5px;
   }
 
   .control-group {
     margin-bottom: 15px;
-  }
-
-  label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: bold;
-  }
-
-  select, input {
-    width: 100%;
     padding: 8px;
-    background-color: rgba(0, 0, 0, 0.5);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    transition: background 0.2s ease;
+  }
+
+  .control-group:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .control-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+  }
+
+  .control-group select {
+    background: rgba(0, 0, 0, 0.6);
     color: white;
-    border: 1px solid #00ffff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 0.5rem;
     border-radius: 4px;
+    font-size: 0.9rem;
+    width: 100%;
+    cursor: pointer;
+    transition: all 0.2s ease;
   }
 
-  input[type="range"] {
+  .control-group select:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.8);
+  }
+
+  .control-group select option {
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+  }
+
+  .control-group input[type="range"] {
     -webkit-appearance: none;
-    height: 8px;
-    background: #333;
-    border-radius: 4px;
-    outline: none;
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    margin: 8px 0;
+    transition: height 0.2s ease;
   }
 
-  input[type="range"]::-webkit-slider-thumb {
+  .control-group input[type="range"]:hover {
+    height: 6px;
+  }
+
+  .control-group input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 16px;
     height: 16px;
-    background: #00ffff;
+    background: #fff;
     border-radius: 50%;
     cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
 
-  .button-group {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 20px;
+  .control-group input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+  }
+
+  .control-group input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .control-group input[type="range"]::-moz-range-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+  }
+
+  .value-display {
+    text-align: right;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .buttons {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 15px;
   }
 
   button {
-    padding: 8px 15px;
-    background-color: #00ffff;
-    color: black;
-    border: none;
-    border-radius: 4px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
+    border-radius: 6px;
     cursor: pointer;
-    font-weight: bold;
+    transition: all 0.2s ease;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
 
   button:hover {
-    background-color: #00cccc;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+  }
+
+  button:active {
+    transform: translateY(0);
+  }
+
+  button.playing {
+    background: rgba(0, 255, 0, 0.15);
+    border-color: rgba(0, 255, 0, 0.3);
+  }
+
+  button.active {
+    background: rgba(0, 255, 255, 0.15);
+    border-color: rgba(0, 255, 255, 0.3);
   }
 
   .info-text {
-    margin-top: 20px;
-    font-size: 0.9em;
-    text-align: center;
-    color: #aaa;
+    margin-top: 15px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    line-height: 1.4;
   }
 
   .dimension-info {
-    margin-top: 5px;
-    font-style: italic;
-    color: #00ffff;
+    margin-top: 8px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    font-size: 11px;
   }
 
-  .control-group:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-    padding-bottom: 0;
+  /* Collapsible sections */
+  .control-group.collapsible {
+    cursor: pointer;
   }
-  
-  h3 {
-    margin: 0 0 12px 0;
-    font-size: 16px;
-    font-weight: bold;
-    color: #4fc3f7;
-  }
-  
-  .control-row {
+
+  .control-group.collapsible > label {
     display: flex;
+    justify-content: space-between;
     align-items: center;
+  }
+
+  .control-group.collapsible > label::after {
+    content: '▼';
+    font-size: 10px;
+    transition: transform 0.2s ease;
+  }
+
+  .control-group.collapsible.collapsed > label::after {
+    transform: rotate(-90deg);
+  }
+
+  .control-group.collapsible.collapsed > *:not(label) {
+    display: none;
+  }
+
+  /* Smooth transitions */
+  * {
+    transition: all 0.2s ease;
+  }
+
+  .geometry-preview {
+    margin-top: 10px;
+    height: 60px;
+    position: relative;
+  }
+
+  .preview-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .preview-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .preview-icon.active {
+    background: rgba(0, 255, 0, 0.2);
+  }
+
+  .preview-animation {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(0, 255, 0, 0.3);
+    transform: translate(-50%, -50%);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0% {
+      width: 0;
+      height: 0;
+      opacity: 1;
+    }
+    100% {
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+    }
+  }
+
+  .advanced-controls {
+    margin-top: 10px;
+  }
+
+  .control-row {
     margin-bottom: 8px;
   }
-  
-  .value-display {
-    min-width: 50px;
-    text-align: right;
-    font-size: 14px;
-    color: #81c784;
+
+  .control-row:last-child {
+    margin-bottom: 0;
   }
-  
-  /* Custom styling for range inputs */
-  input[type="range"] {
-    -webkit-appearance: none;
-    height: 6px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
-    outline: none;
-  }
-  
-  input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
-    background: #4fc3f7;
-    border-radius: 50%;
-    cursor: pointer;
-  }
-  
-  input[type="range"]::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    background: #4fc3f7;
-    border-radius: 50%;
-    cursor: pointer;
-    border: none;
-  }
-  
-  /* Scrollbar styling */
-  .controls::-webkit-scrollbar {
-    width: 8px;
-  }
-  
-  .controls::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-  }
-  
-  .controls::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 4px;
-  }
-  
-  .controls::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.5);
+
+  h3 {
+    font-size: 12px;
+    margin: 0 0 8px 0;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 600;
   }
 </style> 

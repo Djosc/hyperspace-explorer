@@ -6,6 +6,7 @@
   import Controls from './lib/components/Controls.svelte';
   import Info from './lib/components/Info.svelte';
   import { appStore } from './lib/stores/appStore';
+  import type { DimensionMode } from './lib/types';
 
   // Component state
   let isLoaded = false;
@@ -27,7 +28,7 @@
   let uncertainty = 0.4;
 
   // Dimension parameters
-  let dimensionMode = '3D';
+  let dimensionMode: DimensionMode = '3D';
   let dimensionRotationSpeed = 1.0;
   let autoRotateDimensions = false;
 
@@ -83,14 +84,36 @@
 
     try {
       // Try WebGL 2 first
-      gl = canvas.getContext('webgl2');
+      gl = canvas.getContext('webgl2', {
+        powerPreference: 'high-performance' as WebGLPowerPreference,
+        antialias: true,
+        alpha: true,
+        depth: true,
+        stencil: false,
+        failIfMajorPerformanceCaveat: false
+      });
       if (gl) {
         contextType = 'webgl2';
         return { isSupported: true, contextType };
       }
 
-      // Fallback to WebGL 1
-      gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      // Fallback to WebGL 1 with optimized settings
+      gl = canvas.getContext('webgl', {
+        powerPreference: 'high-performance' as WebGLPowerPreference,
+        antialias: true,
+        alpha: true,
+        depth: true,
+        stencil: false,
+        failIfMajorPerformanceCaveat: false
+      }) || canvas.getContext('experimental-webgl', {
+        powerPreference: 'high-performance' as WebGLPowerPreference,
+        antialias: true,
+        alpha: true,
+        depth: true,
+        stencil: false,
+        failIfMajorPerformanceCaveat: false
+      }) as WebGLRenderingContext | null;
+      
       if (gl) {
         contextType = 'webgl1';
         return { isSupported: true, contextType };
@@ -109,6 +132,7 @@
   onMount(() => {
     // Check WebGL support first
     webGLSupport = checkWebGLSupport();
+    console.log('WebGL Support:', webGLSupport);
     
     // Initialize Three.js scene
     scene = new THREE.Scene();
@@ -124,26 +148,40 @@
     camera.position.z = 5;
 
     try {
-      // Initialize renderer with appropriate settings based on WebGL support
-      renderer = new THREE.WebGLRenderer({ 
+      // Initialize renderer with optimized settings based on WebGL support
+      const rendererOptions: THREE.WebGLRendererParameters = {
         antialias: webGLSupport.contextType === 'webgl2',
-        powerPreference: 'default', // Changed from high-performance to default
-        precision: 'mediump',
+        powerPreference: 'high-performance' as WebGLPowerPreference,
+        precision: webGLSupport.contextType === 'webgl2' ? 'highp' : 'mediump',
         alpha: true,
         stencil: false,
         depth: true,
-        logarithmicDepthBuffer: false
-      });
+        logarithmicDepthBuffer: false,
+        failIfMajorPerformanceCaveat: false
+      };
+
+      renderer = new THREE.WebGLRenderer(rendererOptions);
 
       // Adjust settings based on context type
       if (webGLSupport.contextType === 'webgl1') {
-        console.log('Using WebGL 1 with reduced features');
-        renderer.capabilities.isWebGL2 = false;
+        console.log('Using WebGL 1 with optimized settings');
         useFallbackRenderer = true;
+        
+        // Optimize for WebGL 1
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      } else {
+        // Use full capabilities for WebGL 2
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
       }
 
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      // Enable shadow maps if supported
+      if (renderer.capabilities.isWebGL2) {
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      }
+
       container.appendChild(renderer.domElement);
 
     } catch (e) {
@@ -154,10 +192,11 @@
       renderer = new THREE.WebGLRenderer({ 
         antialias: false,
         precision: 'lowp',
-        powerPreference: 'default',
+        powerPreference: 'default' as WebGLPowerPreference,
         alpha: false,
         stencil: false,
-        depth: true
+        depth: true,
+        failIfMajorPerformanceCaveat: false
       });
       
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -191,6 +230,8 @@
     let lastTime = 0;
     let frameCount = 0;
     let lastFpsUpdate = 0;
+    let frameTimeHistory: number[] = [];
+    const MAX_FRAME_TIME_HISTORY = 60;
     
     function animate() {
       animationFrameId = requestAnimationFrame(animate);
@@ -199,16 +240,28 @@
       const delta = (currentTime - lastTime) / 1000;
       lastTime = currentTime;
       
+      // Track frame times for performance monitoring
+      frameTimeHistory.push(delta);
+      if (frameTimeHistory.length > MAX_FRAME_TIME_HISTORY) {
+        frameTimeHistory.shift();
+      }
+      
+      // Calculate average frame time
+      const avgFrameTime = frameTimeHistory.reduce((a, b) => a + b, 0) / frameTimeHistory.length;
+      
       // FPS monitoring
       frameCount++;
       if (currentTime - lastFpsUpdate > 1000) {
         const fps = Math.round(frameCount * 1000 / (currentTime - lastFpsUpdate));
+        console.log(`FPS: ${fps}, Avg Frame Time: ${(avgFrameTime * 1000).toFixed(2)}ms`);
+        
+        // Switch to fallback mode if performance is poor
         if (fps < 30 && !useFallbackRenderer) {
           console.warn('Low FPS detected, switching to fallback mode');
           useFallbackRenderer = true;
           // Adjust render quality
           renderer.setPixelRatio(1);
-          renderer.setSize(window.innerWidth, window.innerHeight, false);
+          renderer.setSize(window.innerWidth, window.innerHeight);
         }
         frameCount = 0;
         lastFpsUpdate = currentTime;
@@ -245,7 +298,7 @@
 <main class:loaded={isLoaded}>
   <div class="container" bind:this={container}>
     {#if scene && camera && controls}
-      <Scene bind:this={sceneComponent} {scene} {camera} {controls} />
+      <Scene bind:this={sceneComponent} {scene} {camera} {controls} {renderer} />
     {/if}
   </div>
   <div class="controls-container">
@@ -305,17 +358,17 @@
   }
   
   .controls-container {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    z-index: 10;
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
   }
   
   .info-button {
-    position: absolute;
+    position: fixed;
     top: 20px;
     right: 20px;
-    z-index: 10;
+    z-index: 1001;
     background-color: rgba(0, 0, 0, 0.5);
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.3);
