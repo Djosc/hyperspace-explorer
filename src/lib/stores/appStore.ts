@@ -43,8 +43,11 @@ function createAppStore(): AppStore {
       });
     },
     setSpeed: (speed: number) => {
-      console.log('AppStore: Setting speed to', speed);
-      update(state => ({ ...state, speed }));
+      console.log('AppStore: Setting speed to', speed, 'Type:', typeof speed);
+      update(state => {
+        console.log('Previous speed:', state.speed, 'New speed:', speed, 'State update:', { ...state, speed });
+        return { ...state, speed };
+      });
     },
     setDimensionMode: (mode: DimensionMode) => {
       console.log('AppStore: Setting dimension mode to', mode);

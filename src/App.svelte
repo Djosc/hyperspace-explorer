@@ -29,7 +29,6 @@
 
   // Dimension parameters
   let dimensionMode: DimensionMode = '3D';
-  let dimensionRotationSpeed = 1.0;
   let autoRotateDimensions = false;
 
   // Update app store when parameters change
@@ -37,10 +36,6 @@
     // Only update if values have actually changed
     if (dimensionMode !== $appStore.dimensionMode) {
       appStore.setDimensionMode(dimensionMode);
-    }
-    
-    if (dimensionRotationSpeed !== $appStore.speed) {
-      appStore.setSpeed(dimensionRotationSpeed);
     }
     
     if (autoRotateDimensions !== $appStore.autoRotateDimensions) {
@@ -137,6 +132,32 @@
     // Initialize Three.js scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
+
+    // Add beautiful lighting for shader materials
+    // Ambient light for overall illumination
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+    scene.add(ambientLight);
+
+    // Main directional light
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(5, 5, 5);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    scene.add(directionalLight);
+
+    // Point lights for colorful accent lighting
+    const pointLight1 = new THREE.PointLight(0x4fc3f7, 0.6, 10);
+    pointLight1.position.set(-3, 2, 3);
+    scene.add(pointLight1);
+
+    const pointLight2 = new THREE.PointLight(0xff7043, 0.6, 10);
+    pointLight2.position.set(3, -2, 3);
+    scene.add(pointLight2);
+
+    const pointLight3 = new THREE.PointLight(0x9c27b0, 0.4, 8);
+    pointLight3.position.set(0, 3, -3);
+    scene.add(pointLight3);
 
     // Initialize camera
     camera = new THREE.PerspectiveCamera(
@@ -253,7 +274,7 @@
       frameCount++;
       if (currentTime - lastFpsUpdate > 1000) {
         const fps = Math.round(frameCount * 1000 / (currentTime - lastFpsUpdate));
-        console.log(`FPS: ${fps}, Avg Frame Time: ${(avgFrameTime * 1000).toFixed(2)}ms`);
+        // console.log(`FPS: ${fps}, Avg Frame Time: ${(avgFrameTime * 1000).toFixed(2)}ms`);
         
         // Switch to fallback mode if performance is poor
         if (fps < 30 && !useFallbackRenderer) {
@@ -312,7 +333,6 @@
       {entanglement}
       {uncertainty}
       {dimensionMode}
-      {dimensionRotationSpeed}
       {autoRotateDimensions}
       on:frequencyChange={(e) => frequency = e.detail}
       on:amplitudeChange={(e) => amplitude = e.detail}
@@ -323,15 +343,16 @@
       on:entanglementChange={(e) => entanglement = e.detail}
       on:uncertaintyChange={(e) => uncertainty = e.detail}
       on:dimensionModeChange={(e) => dimensionMode = e.detail}
-      on:dimensionRotationSpeedChange={(e) => dimensionRotationSpeed = e.detail}
       on:autoRotateDimensionsChange={(e) => autoRotateDimensions = e.detail}
       on:geometryTypeChange={(e) => appStore.setGeometryType(e.detail)}
       on:colorModeChange={(e) => appStore.setColorMode(e.detail)}
     />
   </div>
-  <button class="info-button" on:click={() => showInfo = !showInfo}>
-    {showInfo ? 'Hide Info' : 'Show Info'}
-  </button>
+  <div class="action-buttons">
+    <button class="info-button" on:click={() => showInfo = !showInfo}>
+      {showInfo ? 'Hide Info' : 'Show Info'}
+    </button>
+  </div>
   {#if showInfo}
     <Info isVisible={showInfo} on:close={() => showInfo = false} />
   {/if}
@@ -364,11 +385,17 @@
     z-index: 1000;
   }
   
-  .info-button {
+  .action-buttons {
     position: fixed;
     top: 20px;
-    right: 20px;
+    left: 20px;
     z-index: 1001;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .info-button {
     background-color: rgba(0, 0, 0, 0.5);
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.3);
@@ -378,10 +405,12 @@
     font-family: 'Arial', sans-serif;
     font-size: 14px;
     transition: all 0.3s ease;
+    white-space: nowrap;
   }
   
   .info-button:hover {
     background-color: rgba(0, 0, 0, 0.7);
     border-color: rgba(255, 255, 255, 0.5);
+    transform: translateY(-1px);
   }
 </style>

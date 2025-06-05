@@ -9,31 +9,32 @@
     'vortex', 
     'neuronal', 
     'tesseract', 
-    'hypersphere', 
-    'hyper5D',
-    'dmtTunnel',
-    'soundResonance',
+    'hypersphere',
     'fractal',
     'quantumField',
-    'hyper6D',
-    'hyper7D',
-    'hyper8D',
-    'hyper9D',
-    'hyper10D',
     'hopfFibration',
+    'hopfTubes',
+    'hopfRibbons',
+    'hopfEducational',
     'goldenSpiral',
     'piSpiral',
     'kleinBottle',
     'mobiusStrip',
-    'torusKnot'
+    'torusKnot',
+    'kochSnowflake',
+    'juliaSet'
   ];
   
   const colorModes: ColorMode[] = [
+    'hyperspace',
     'spectralShift', 
     'kaleidoscope', 
     'both', 
-    'hyperspace',
-    'mathematical'
+    'mathematical',
+    'soundResonance',
+    'fractal',
+    'quantumField',
+    'juliaSet'
   ];
 
   const dimensionModes: DimensionMode[] = [
@@ -68,6 +69,12 @@
   // Add state for advanced controls
   let showAdvanced = false;
 
+  // Add Julia set specific state
+  let juliaComplexReal = -0.4;
+  let juliaComplexImag = 0.6;
+  let juliaIterations = 50;
+  let juliaResolution = 50;
+
   function handleGeometryTypeChange(event: Event) {
     const select = event.target as HTMLSelectElement;
     if (!select || !geometryTypes.includes(select.value as GeometryType)) {
@@ -75,7 +82,6 @@
       return;
     }
     const value = select.value as GeometryType;
-    console.log(`Changing geometry type to: ${value}`);
     appStore.setGeometryType(value);
   }
 
@@ -86,7 +92,6 @@
       return;
     }
     const value = select.value as ColorMode;
-    console.log(`Changing color mode to: ${value}`);
     appStore.setColorMode(value);
   }
 
@@ -97,7 +102,6 @@
       return;
     }
     const value = select.value as DimensionMode;
-    console.log(`Changing dimension mode to: ${value}`);
     appStore.setDimensionMode(value);
   }
 
@@ -109,8 +113,6 @@
       ? target.checked 
       : parseFloat(target.value);
     
-    console.log(`Input change for ${param}:`, value);
-    
     switch(param) {
       case 'complexity':
         appStore.setComplexity(parseInt(target.value));
@@ -119,7 +121,26 @@
         appStore.setSymmetry(parseInt(target.value));
         break;
       case 'speed':
-        appStore.setSpeed(parseFloat(target.value));
+        const speedValue = parseFloat(target.value);
+        if (!isNaN(speedValue)) {
+          appStore.setSpeed(speedValue);
+        }
+        break;
+      case 'juliaComplexReal':
+        juliaComplexReal = parseFloat(target.value);
+        dispatch('juliaComplexChange', [juliaComplexReal, juliaComplexImag]);
+        break;
+      case 'juliaComplexImag':
+        juliaComplexImag = parseFloat(target.value);
+        dispatch('juliaComplexChange', [juliaComplexReal, juliaComplexImag]);
+        break;
+      case 'juliaIterations':
+        juliaIterations = parseInt(target.value);
+        dispatch('juliaIterationsChange', juliaIterations);
+        break;
+      case 'juliaResolution':
+        juliaResolution = parseInt(target.value);
+        dispatch('juliaResolutionChange', juliaResolution);
         break;
       default:
         dispatch(`${param}Change`, value);
@@ -130,13 +151,11 @@
     const target = event.target as HTMLSelectElement;
     if (!target) return;
     
-    console.log(`Select change for ${param}:`, target.value);
     dispatch(`${param}Change`, target.value);
   }
 
   function togglePlayPause() {
     const newState = !$appStore.isPlaying;
-    console.log(`Toggling play/pause to: ${newState ? 'play' : 'pause'}`);
     appStore.togglePlay();
     
     // If we're pausing, also stop rotation
@@ -146,12 +165,10 @@
   }
 
   function toggleAnnotations() {
-    console.log('Toggling annotations');
     appStore.toggleAnnotations();
   }
 
   function toggleDimensionRotation() {
-    console.log('Toggling dimension rotation');
     // Only allow rotation if we're in play mode
     if ($appStore.isPlaying) {
       appStore.toggleDimensionRotation();
@@ -160,6 +177,34 @@
   
   // Format the display name for geometry types and color modes
   function formatDisplayName(name: string): string {
+    // Special cases for better naming
+    const specialNames: Record<string, string> = {
+      'hopfFibration': 'Hopf Fibration (Classic)',
+      'hopfTubes': 'Hopf Fibration (Smooth Tubes)',
+      'hopfRibbons': 'Hopf Fibration (Flowing Ribbons)',
+      'hopfEducational': 'Hopf Fibration (With Base Sphere)',
+      'kleinBottle': 'Klein Bottle',
+      'mobiusStrip': 'Möbius Strip',
+      'torusKnot': 'Torus Knot',
+      'kochSnowflake': 'Koch Snowflake',
+      'juliaSet': 'Julia Set (3D)',
+      'hyperCube': 'HyperCube (4D)',
+      'goldenSpiral': 'Golden Ratio Spiral',
+      'piSpiral': 'Pi (π) Spiral',
+      'quantumField': 'Quantum Field',
+      'spectralShift': 'Spectral Shift (Rainbow)',
+      'kaleidoscope': 'Kaleidoscope',
+      'both': 'Combined (Spectral + Kaleidoscope)',
+      'hyperspace': 'Hyperspace (Multidimensional)',
+      'mathematical': 'Mathematical (Position-based)',
+      'soundResonance': 'Sound Resonance',
+      'fractal': 'Fractal Patterns'
+    };
+    
+    if (specialNames[name]) {
+      return specialNames[name];
+    }
+    
     // Convert camelCase to Title Case with spaces
     return name
       .replace(/([A-Z])/g, ' $1') // Add space before capital letters
@@ -238,7 +283,7 @@
       type="range" 
       id="speed" 
       min="0.1" 
-      max="2" 
+      max="3" 
       step="0.1" 
       value={$appStore.speed} 
       on:input={(e) => handleInputChange(e, 'speed')}
@@ -373,6 +418,67 @@
       </div>
     {/if}
   </div>
+
+  <!-- Add Julia set controls -->
+  {#if $appStore.geometryType === 'juliaSet'}
+    <div class="control-group julia-controls">
+      <h3>Julia Set Parameters</h3>
+      
+      <div class="control-group">
+        <label for="julia-complex-real">Complex Real</label>
+        <input 
+          type="range" 
+          id="julia-complex-real" 
+          min="-2" 
+          max="2" 
+          step="0.01"
+          value={juliaComplexReal} 
+          on:input={(e) => handleInputChange(e, 'juliaComplexReal')}
+        />
+        <div class="value-display">{juliaComplexReal.toFixed(2)}</div>
+      </div>
+
+      <div class="control-group">
+        <label for="julia-complex-imag">Complex Imaginary</label>
+        <input 
+          type="range" 
+          id="julia-complex-imag" 
+          min="-2" 
+          max="2" 
+          step="0.01"
+          value={juliaComplexImag} 
+          on:input={(e) => handleInputChange(e, 'juliaComplexImag')}
+        />
+        <div class="value-display">{juliaComplexImag.toFixed(2)}</div>
+      </div>
+
+      <div class="control-group">
+        <label for="julia-iterations">Iterations</label>
+        <input 
+          type="range" 
+          id="julia-iterations" 
+          min="10" 
+          max="200" 
+          value={juliaIterations} 
+          on:input={(e) => handleInputChange(e, 'juliaIterations')}
+        />
+        <div class="value-display">{juliaIterations}</div>
+      </div>
+
+      <div class="control-group">
+        <label for="julia-resolution">Resolution</label>
+        <input 
+          type="range" 
+          id="julia-resolution" 
+          min="20" 
+          max="100" 
+          value={juliaResolution} 
+          on:input={(e) => handleInputChange(e, 'juliaResolution')}
+        />
+        <div class="value-display">{juliaResolution}</div>
+      </div>
+    </div>
+  {/if}
 
   <div class="info-text">
     <p>Explore higher dimensions through mathematical visualization</p>
@@ -673,5 +779,9 @@
     margin: 0 0 8px 0;
     color: rgba(255, 255, 255, 0.8);
     font-weight: 600;
+  }
+
+  .julia-controls {
+    margin-top: 10px;
   }
 </style> 

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 /**
  * Color mode types for post-processing effects
  */
-export type ColorMode = 'spectralShift' | 'kaleidoscope' | 'both' | 'hyperspace' | 'mathematical' | 'soundResonance' | 'fractal' | 'quantumField';
+export type ColorMode = 'spectralShift' | 'kaleidoscope' | 'both' | 'hyperspace' | 'mathematical' | 'soundResonance' | 'fractal' | 'quantumField' | 'juliaSet';
 
 /**
  * Effect types for post-processing
@@ -13,29 +13,26 @@ export type EffectType = 'rgbShift' | 'kaleidoscope' | 'none';
 /**
  * Geometry types
  */
-export type GeometryType = 
-  | 'hyperCube' 
-  | 'mandala' 
-  | 'vortex' 
-  | 'neuronal' 
-  | 'tesseract' 
-  | 'hypersphere' 
-  | 'hyper5D' 
-  | 'dmtTunnel'
-  | 'soundResonance'
+export type GeometryType =
+  | 'hyperCube'
+  | 'mandala'
+  | 'vortex'
+  | 'neuronal'
+  | 'tesseract'
+  | 'hypersphere'
   | 'fractal'
   | 'quantumField'
-  | 'hyper6D'
-  | 'hyper7D'
-  | 'hyper8D'
-  | 'hyper9D'
-  | 'hyper10D'
   | 'hopfFibration'
+  | 'hopfTubes'
+  | 'hopfRibbons'
+  | 'hopfEducational'
   | 'goldenSpiral'
   | 'piSpiral'
   | 'kleinBottle'
   | 'mobiusStrip'
-  | 'torusKnot';
+  | 'torusKnot'
+  | 'kochSnowflake'
+  | 'juliaSet';
 
 /**
  * Dimension exploration modes

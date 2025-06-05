@@ -8,6 +8,9 @@
   import { createGeometry } from '../utils/geometry';
   import { createMaterial } from '../utils/material';
   import { QuaternionKeyframeTrack, VectorKeyframeTrack } from 'three';
+  import { JuliaSetShader } from '../shaders/JuliaSetShader';
+  import { createJuliaSet } from '../utils/mathGeometry';
+  import { createHopfFibration, createGoldenSpiral, createPiSpiral, createKleinBottle, createMobiusStrip, createTorusKnot, createHopfFibrationTubes, createHopfFibrationRibbons, createHopfFibrationWithBaseSphere } from '../utils/mathGeometry';
 
   // Define material uniforms type
   interface MaterialUniforms {
@@ -43,9 +46,8 @@
   let dimensionRotationSpeed: number = 0.05;
 
   // Three.js objects
-  let geometry: THREE.BufferGeometry;
-  let material: CustomShaderMaterial;
-  let mesh: THREE.Mesh<THREE.BufferGeometry, CustomShaderMaterial>;
+  let geometry: THREE.BufferGeometry | null = null;
+  let material: CustomShaderMaterial | null = null;
   let clock: THREE.Clock;
   let time: number = 0;
   let particles: THREE.Points;
@@ -59,6 +61,7 @@
   let dimensionProjection: number = 0.5; // Controls how much of the higher dimension is projected
   let particleSystem: { update: (deltaTime: number) => void } | null = null;
   let keyHandler: ((event: KeyboardEvent) => void) | null = null;
+  let currentObject: THREE.Object3D | null = null;
 
   // New rotation patterns
   const ROTATION_PATTERNS = {
@@ -125,6 +128,14 @@
   // Add a flag to control rotation updates
   let shouldUpdateRotation = true;
 
+  // Add Julia set specific state
+  let juliaComplex: [number, number] = [-0.4, 0.6];
+  let juliaIterations: number = 50;
+  let juliaResolution: number = 50;
+
+  // Add LOD update function to the component
+  let lodUpdateFunction: (() => void) | null = null;
+
   // Function to safely toggle auto-rotation with debounce
   function safeToggleAutoRotation(enable: boolean) {
     const currentTime = Date.now();
@@ -132,9 +143,9 @@
       if ($appStore.autoRotateDimensions !== enable) {
         // Store current rotation state before toggling
         const currentRotationState = {
-          x: mesh?.rotation.x || 0,
-          y: mesh?.rotation.y || 0,
-          z: mesh?.rotation.z || 0,
+          x: currentObject?.rotation.x || 0,
+          y: currentObject?.rotation.y || 0,
+          z: currentObject?.rotation.z || 0,
           w: currentRotation.w,
           v: currentRotation.v
         };
@@ -144,7 +155,7 @@
         lastToggleTime = currentTime;
         
         // If we're disabling auto-rotation, preserve the current rotation
-        if (!enable && mesh) {
+        if (!enable && currentObject && (currentObject instanceof THREE.Mesh || currentObject instanceof THREE.Points)) {
           // Set target rotation to current rotation to prevent reset
           targetRotation = { ...currentRotationState };
           currentRotation = { ...currentRotationState };
@@ -168,9 +179,9 @@
         console.log('Pausing auto-rotation');
         // Store current rotation state before toggling
         const currentRotationState = {
-          x: mesh?.rotation.x || 0,
-          y: mesh?.rotation.y || 0,
-          z: mesh?.rotation.z || 0,
+          x: currentObject?.rotation.x || 0,
+          y: currentObject?.rotation.y || 0,
+          z: currentObject?.rotation.z || 0,
           w: currentRotation.w,
           v: currentRotation.v
         };
@@ -202,9 +213,9 @@
         console.log('Resuming auto-rotation');
         // Store current rotation state before toggling
         const currentRotationState = {
-          x: mesh?.rotation.x || 0,
-          y: mesh?.rotation.y || 0,
-          z: mesh?.rotation.z || 0,
+          x: currentObject?.rotation.x || 0,
+          y: currentObject?.rotation.y || 0,
+          z: currentObject?.rotation.z || 0,
           w: currentRotation.w,
           v: currentRotation.v
         };
@@ -255,331 +266,131 @@
     }
   }
 
-  // Separate function for geometry updates
+  // Update geometry function to create solid surfaces with beautiful materials
   function updateGeometry() {
-    if (!scene || !camera || !renderer) return;
-
-    const isGeometryTypeChange = geometryType !== $appStore.geometryType;
-    geometryType = $appStore.geometryType;
-
-    // Store original scale and position
-    const originalScale = mesh ? mesh.scale.clone() : new THREE.Vector3(1, 1, 1);
-    const originalPosition = mesh ? mesh.position.clone() : new THREE.Vector3(0, 0, 0);
-
-    // Create a timeline for the transition
-    const timeline = gsap.timeline({
-      onComplete: () => {
-        console.log('Geometry transition complete');
-        createAnimations();
-      }
-    });
-
-    if (isGeometryTypeChange && mesh) {
-      console.log('Starting geometry type change animation');
-      
-      // First, ensure the mesh is at its original scale
-      mesh.scale.set(1, 1, 1);
-      mesh.position.set(0, 0, 0);
-      mesh.rotation.set(0, 0, 0);
-
-      // Black hole effect - more dramatic collapse
-      timeline.to(mesh.scale, {
-        x: 0.0001, // Much smaller scale for more dramatic effect
-        y: 0.0001,
-        z: 0.0001,
-        duration: 2.0, // Shorter duration for more responsive feel
-        ease: "power4.in", // More aggressive easing
-        onUpdate: () => {
-          if (mesh) {
-            // More dramatic spiral rotation during collapse
-            mesh.rotation.y += 0.3;
-            mesh.rotation.z += 0.15;
-            mesh.rotation.x = Math.sin(Date.now() * 0.03) * 0.8;
-            
-            // More dramatic position shift
-            mesh.position.y = Math.sin(Date.now() * 0.04) * 0.3;
-            mesh.position.x = Math.cos(Date.now() * 0.04) * 0.3;
-            mesh.position.z = Math.sin(Date.now() * 0.03) * 0.2;
-
-            // Add a more pronounced wobble effect
-            const wobble = Math.sin(Date.now() * 0.08) * 0.15;
-            mesh.scale.x += wobble;
-            mesh.scale.y += wobble;
-            mesh.scale.z += wobble;
-          }
-        }
-      });
-
-      // Add particle burst effect for black hole
-      const particleCount = 3000; // More particles
-      const particles = new THREE.BufferGeometry();
-      const positions = new Float32Array(particleCount * 3);
-      const colors = new Float32Array(particleCount * 3);
-      const sizes = new Float32Array(particleCount);
-
-      for (let i = 0; i < particleCount; i++) {
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(2 * Math.random() - 1);
-        const radius = 0.3; // Larger initial radius
-
-        positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-        positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-        positions[i * 3 + 2] = radius * Math.cos(phi);
-
-        // More vibrant colors
-        colors[i * 3] = Math.random() * 0.8 + 0.2; // Brighter reds
-        colors[i * 3 + 1] = Math.random() * 0.8 + 0.2; // Brighter greens
-        colors[i * 3 + 2] = Math.random() * 0.8 + 0.2; // Brighter blues
-
-        sizes[i] = Math.random() * 0.8; // Larger particles
-      }
-
-      particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-
-      const particleSystem = new THREE.Points(particles, particleMaterial);
-      particleSystem.position.copy(mesh.position);
-      scene.add(particleSystem);
-
-      // Animate particles - more dramatic burst
-      timeline.to(particleSystem.scale, {
-        x: 40, // Larger scale
-        y: 40,
-        z: 40,
-        duration: 2.0, // Shorter duration
-        ease: "power2.out",
-        onUpdate: () => {
-          const positions = particles.attributes.position.array;
-          for (let i = 0; i < positions.length; i += 3) {
-            positions[i] *= 1.12; // Faster expansion
-            positions[i + 1] *= 1.12;
-            positions[i + 2] *= 1.12;
-          }
-          particles.attributes.position.needsUpdate = true;
-        },
-        onComplete: () => {
-          scene.remove(particleSystem);
-          particles.dispose();
-          particleMaterial.dispose();
-        }
-      }, "-=1.5"); // More overlap with collapse
-
-      // Remove old mesh and create new geometry
-      timeline.call(() => {
-        if (mesh) {
-          scene.remove(mesh);
-          if (mesh.geometry) mesh.geometry.dispose();
-          if (mesh.material) {
-            mesh.material.dispose();
-          }
-        }
-
-        geometry = createGeometry($appStore.geometryType, $appStore.complexity, $appStore.symmetry);
-        material = createMaterial($appStore.colorMode);
-
-        mesh = new THREE.Mesh(geometry, material);
-        mesh.scale.set(0.0001, 0.0001, 0.0001); // Start from collapsed state
-        mesh.visible = false; // Make new mesh invisible initially
-        scene.add(mesh);
-        animationMixer = new THREE.AnimationMixer(mesh);
-      });
-
-      // Make mesh visible and start expansion
-      timeline.call(() => {
-        if (mesh) {
-          mesh.visible = true;
-        }
-      });
-
-      // First expansion - white hole explosion
-      timeline.to(mesh.scale, {
-        x: originalScale.x * 4.0, // Larger explosion
-        y: originalScale.y * 4.0,
-        z: originalScale.z * 4.0,
-        duration: 1.0, // Shorter duration
-        ease: "power2.out",
-        onUpdate: () => {
-          if (mesh) {
-            mesh.rotation.y -= 0.4; // Faster rotation
-            mesh.rotation.z -= 0.2;
-            mesh.rotation.x = Math.sin(Date.now() * 0.04) * 1.0; // More dramatic wobble
-          }
-        }
-      });
-
-      // Add glow effect for higher complexity
-      if ($appStore.complexity > 0.5) {
-        const glowMaterial = createMaterial($appStore.colorMode);
-        if (glowMaterial.uniforms && glowMaterial.uniforms.opacity) {
-          glowMaterial.uniforms.opacity.value = 0.8; // More visible glow
-        }
-        glowMaterial.side = THREE.BackSide;
-        
-        const glowMesh = new THREE.Mesh<THREE.BufferGeometry, CustomShaderMaterial>(geometry.clone(), glowMaterial);
-        glowMesh.scale.multiplyScalar(1.8); // Larger glow
-        glowMesh.visible = false; // Make glow mesh invisible initially
-        scene.add(glowMesh);
-        
-        // Make glow mesh visible
-        timeline.call(() => {
-          if (glowMesh) {
-            glowMesh.visible = true;
-          }
-        });
-        
-        timeline.to(glowMesh.scale, {
-          x: glowMesh.scale.x * 5.0, // Larger expansion
-          y: glowMesh.scale.y * 5.0,
-          z: glowMesh.scale.z * 5.0,
-          duration: 1.5, // Shorter duration
-          ease: "power2.out",
-          onComplete: () => {
-            scene.remove(glowMesh);
-            glowMesh.geometry.dispose();
-            glowMesh.material.dispose();
-          }
-        }, "-=0.8");
-      }
-
-      // Second expansion - elastic bounce
-      timeline.to(mesh.scale, {
-        x: originalScale.x * 2.0, // Larger bounce
-        y: originalScale.y * 2.0,
-        z: originalScale.z * 2.0,
-        duration: 0.8, // Shorter duration
-        ease: "elastic.out(1, 0.3)", // More elastic
-        onUpdate: () => {
-          if (mesh) {
-            mesh.rotation.y += 0.2;
-            mesh.rotation.z += 0.1;
-            mesh.rotation.x = Math.sin(Date.now() * 0.03) * 0.6;
-          }
-        }
-      });
-
-      // Final settling to original scale
-      timeline.to(mesh.scale, {
-        x: originalScale.x,
-        y: originalScale.y,
-        z: originalScale.z,
-        duration: 1.5, // Shorter duration
-        ease: "elastic.out(1, 0.2)", // More elastic
-        onUpdate: () => {
-          if (mesh) {
-            mesh.rotation.y += 0.1;
-            mesh.rotation.z += 0.05;
-            mesh.rotation.x = Math.sin(Date.now() * 0.02) * 0.4;
-          }
-        }
-      });
-
-      // Add final flourish
-      timeline.to(mesh.rotation, {
-        y: mesh.rotation.y + Math.PI * 2,
-        duration: 2.0, // Shorter duration
-        ease: "power2.inOut",
-        onUpdate: () => {
-          if (mesh) {
-            const pulse = Math.sin(Date.now() * 0.004) * 0.12; // Larger pulse
-            mesh.scale.setScalar(1 + pulse);
-          }
-        }
-      });
-    } else {
-      // For non-geometry type changes, still ensure proper scaling
-      if (mesh) {
-        mesh.visible = false; // Make mesh invisible initially
-        mesh.scale.set(0.0001, 0.0001, 0.0001); // Start from collapsed state
-      }
-
-      // Remove old mesh and dispose of old geometry and material
-      if (mesh) {
-        scene.remove(mesh);
-        if (mesh.geometry) mesh.geometry.dispose();
-        if (mesh.material) {
-          mesh.material.dispose();
+    console.log('[updateGeometry] Creating geometry for type:', geometryType);
+    
+    // Remove current object if it exists
+    if (currentObject) {
+      scene.remove(currentObject);
+      if (currentObject instanceof THREE.Mesh || currentObject instanceof THREE.Points) {
+        currentObject.geometry.dispose();
+        if (Array.isArray(currentObject.material)) {
+          currentObject.material.forEach(mat => mat.dispose());
+        } else {
+          currentObject.material.dispose();
         }
       }
-
-      // Create new geometry
-      geometry = createGeometry($appStore.geometryType, $appStore.complexity, $appStore.symmetry);
-      material = createMaterial($appStore.colorMode);
-
-      mesh = new THREE.Mesh(geometry, material);
-      mesh.scale.set(0.0001, 0.0001, 0.0001); // Start from collapsed state
-      scene.add(mesh);
-
-      // Initialize animation mixer with the mesh
-      animationMixer = new THREE.AnimationMixer(mesh);
-
-      // Make mesh visible and scale up
-      timeline.call(() => {
-        if (mesh) {
-          mesh.visible = true;
-        }
-      });
-
-      // Scale up animation
-      timeline.to(mesh.scale, {
-        x: 1,
-        y: 1,
-        z: 1,
-        duration: 1.0,
-        ease: "elastic.out(1, 0.3)",
-        onUpdate: () => {
-          if (mesh) {
-            mesh.rotation.y += 0.1;
-            mesh.rotation.z += 0.05;
-            mesh.rotation.x = Math.sin(Date.now() * 0.02) * 0.4;
-          }
-        }
-      });
-
-      // Subtle fuzzy effect for other parameter changes
-      if (material.uniforms && material.uniforms.opacity) {
-        timeline.to(material.uniforms.opacity, {
-          value: 0.4,
-          duration: 0.2,
-          ease: "power2.inOut"
-        });
-      }
-
-      if (material.uniforms && material.uniforms.fuzziness) {
-        timeline.to(material.uniforms.fuzziness, {
-          value: 0.3,
-          duration: 0.2,
-          ease: "power2.inOut"
-        });
-      }
-
-      if (material.uniforms && material.uniforms.opacity) {
-        timeline.to(material.uniforms.opacity, {
-          value: 0.8,
-          duration: 0.2,
-          ease: "power2.inOut"
-        });
-      }
-
-      if (material.uniforms && material.uniforms.fuzziness) {
-        timeline.to(material.uniforms.fuzziness, {
-          value: 0,
-          duration: 0.2,
-          ease: "power2.inOut"
-        });
-      }
+      currentObject = null;
     }
 
-    // Update animations based on play state
-    createAnimations();
+    // For special geometries that return groups
+    if (geometryType === 'hopfFibration' || geometryType === 'hopfTubes' || geometryType === 'hopfRibbons' || geometryType === 'hopfEducational' ||
+        geometryType === 'goldenSpiral' || geometryType === 'piSpiral' || 
+        geometryType === 'torusKnot') {
+      const geometryOrGroup = createGeometryForType(geometryType);
+      addGeometryToScene(geometryOrGroup);
+      return;
+    }
+
+    // For all other types: create geometry with beautiful shader materials
+    if (geometry) (geometry as THREE.BufferGeometry).dispose();
+    if (material) (material as THREE.Material).dispose();
+    geometry = createGeometryForType(geometryType);
+
+    if (geometry) {
+      try {
+        // Optimize geometry
+        geometry.computeBoundingSphere();
+        geometry.computeBoundingBox();
+        
+        // Compute normals if missing for proper lighting
+        if (!geometry.attributes.normal) {
+          geometry.computeVertexNormals();
+        }
+        
+        // Create the beautiful shader material
+        material = createMaterial(colorMode);
+        
+        // Create solid mesh with shader material
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        
+        // Optional: Add wireframe overlay for mathematical precision visualization
+        if (showAnnotations) {
+          try {
+            const wireframeGeometry = new THREE.WireframeGeometry(geometry);
+            
+            // Validate wireframe geometry before using it
+            if (wireframeGeometry.attributes.position && 
+                wireframeGeometry.attributes.position.array.length > 0) {
+              
+              // Check for NaN values in position array
+              const positions = wireframeGeometry.attributes.position.array;
+              let hasNaN = false;
+              for (let i = 0; i < positions.length; i++) {
+                if (isNaN(positions[i])) {
+                  hasNaN = true;
+                  break;
+                }
+              }
+              
+              if (!hasNaN) {
+                const wireframeMaterial = new THREE.LineBasicMaterial({
+                  color: 0xffffff,
+                  transparent: true,
+                  opacity: 0.1,  // Very subtle wireframe overlay
+                  depthTest: true,
+                  depthWrite: false
+                });
+                const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+                
+                // Create a group to hold both mesh and wireframe
+                const group = new THREE.Group();
+                group.add(mesh);
+                group.add(wireframe);
+                scene.add(group);
+                currentObject = group;
+              } else {
+                console.warn('Wireframe geometry contains NaN values, skipping wireframe overlay');
+                // Just add the solid mesh without wireframe
+                scene.add(mesh);
+                currentObject = mesh;
+              }
+            } else {
+              console.warn('Invalid wireframe geometry, skipping wireframe overlay');
+              // Just add the solid mesh without wireframe
+              scene.add(mesh);
+              currentObject = mesh;
+            }
+          } catch (wireframeError) {
+            console.warn('Error creating wireframe overlay:', wireframeError);
+            // Just add the solid mesh without wireframe
+            scene.add(mesh);
+            currentObject = mesh;
+          }
+        } else {
+          // Just add the solid mesh
+          scene.add(mesh);
+          currentObject = mesh;
+        }
+        
+        console.log('[updateGeometry] Added solid mesh with shader material:', currentObject);
+      } catch (e) {
+        console.error('[updateGeometry] Error creating mesh:', e, 'geometry:', geometry);
+      }
+    } else {
+      console.error('[updateGeometry] geometry is null, cannot create mesh.');
+    }
   }
 
   // Update material when color mode changes
   $: if ($appStore.colorMode && material) {
-    const newMaterial = createMaterial($appStore.colorMode);
-    if (mesh) {
-      mesh.material = newMaterial;
-      if (material) material.dispose();
+    const newMaterial = createMaterial(colorMode);
+    if (currentObject && (currentObject instanceof THREE.Mesh || currentObject instanceof THREE.Points)) {
+      (currentObject as THREE.Mesh | THREE.Points).material = newMaterial;
+      if (material) (material as THREE.Material).dispose();
       material = newMaterial;
     }
   }
@@ -597,7 +408,7 @@
   // Create enhanced particle system
   function createParticleSystem() {
     // Increase particle count for more density
-    const particleCount = 2000;
+    const particleCount = 3000;
     
     // Create arrays for particle attributes
     const positions = new Float32Array(particleCount * 3);
@@ -605,154 +416,43 @@
     const sizes = new Float32Array(particleCount);
     const velocities = new Float32Array(particleCount * 3);
     const phases = new Float32Array(particleCount);
+    const lifetimes = new Float32Array(particleCount);
     
-    // Color palette based on current color mode
-    const colorPalettes = {
-      spectralShift: [
-        new THREE.Color(0xff0000), // Red
-        new THREE.Color(0xff7f00), // Orange
-        new THREE.Color(0xffff00), // Yellow
-        new THREE.Color(0x00ff00), // Green
-        new THREE.Color(0x0000ff), // Blue
-        new THREE.Color(0x4b0082), // Indigo
-        new THREE.Color(0x9400d3)  // Violet
-      ],
-      kaleidoscope: [
-        new THREE.Color(0xff00ff), // Magenta
-        new THREE.Color(0x00ffff), // Cyan
-        new THREE.Color(0xffff00), // Yellow
-        new THREE.Color(0xff0000), // Red
-        new THREE.Color(0x00ff00), // Green
-        new THREE.Color(0x0000ff)  // Blue
-      ],
-      both: [
-        new THREE.Color(0xff00ff), // Magenta
-        new THREE.Color(0x00ffff), // Cyan
-        new THREE.Color(0xffff00), // Yellow
-        new THREE.Color(0xff0000), // Red
-        new THREE.Color(0x00ff00), // Green
-        new THREE.Color(0x0000ff)  // Blue
-      ],
-      hyperspace: [
-        new THREE.Color(0x0000ff), // Blue
-        new THREE.Color(0x00ffff), // Cyan
-        new THREE.Color(0x00ff00), // Green
-        new THREE.Color(0xffff00), // Yellow
-        new THREE.Color(0xff0000)  // Red
-      ],
-      mathematical: [
-        new THREE.Color(0xffffff), // White
-        new THREE.Color(0x00ffff), // Cyan
-        new THREE.Color(0x0000ff), // Blue
-        new THREE.Color(0x000080)  // Navy
-      ],
-      soundResonance: [
-        new THREE.Color(0xff0000), // Red
-        new THREE.Color(0xff7f00), // Orange
-        new THREE.Color(0xffff00), // Yellow
-        new THREE.Color(0x00ff00), // Green
-        new THREE.Color(0x0000ff)  // Blue
-      ],
-      fractal: [
-        new THREE.Color(0x00ff00), // Green
-        new THREE.Color(0x008000), // Dark Green
-        new THREE.Color(0x0000ff), // Blue
-        new THREE.Color(0x000080)  // Navy
-      ],
-      quantumField: [
-        new THREE.Color(0x0000ff), // Blue
-        new THREE.Color(0x00ffff), // Cyan
-        new THREE.Color(0xffffff), // White
-        new THREE.Color(0x000080)  // Navy
-      ]
-    };
-    
-    // Get current color palette or default to spectralShift
-    const currentPalette = colorPalettes[colorMode] || colorPalettes.spectralShift;
-    
-    // Create different particle patterns based on geometry type
+    // Initialize particles with smooth distribution
     for (let i = 0; i < particleCount; i++) {
-      // Determine particle pattern based on geometry type
-      let radius, theta, phi;
+      // Use spherical distribution for better coverage
+      const radius = 3 + Math.random() * 7;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
       
-      switch(geometryType) {
-        case 'hyperCube':
-        case 'tesseract':
-          // Cubic distribution for hypercube
-          const cubeSize = 10;
-          positions[i * 3] = (Math.random() - 0.5) * cubeSize;
-          positions[i * 3 + 1] = (Math.random() - 0.5) * cubeSize;
-          positions[i * 3 + 2] = (Math.random() - 0.5) * cubeSize;
-          break;
-          
-        case 'mandala':
-          // Spiral distribution for mandala
-          const spiralRadius = 2 + Math.random() * 8;
-          const spiralAngle = Math.random() * Math.PI * 20;
-          positions[i * 3] = spiralRadius * Math.cos(spiralAngle);
-          positions[i * 3 + 1] = spiralRadius * Math.sin(spiralAngle);
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 5;
-          break;
-          
-        case 'vortex':
-          // Vortex distribution
-          const vortexRadius = 1 + Math.random() * 9;
-          const vortexAngle = Math.random() * Math.PI * 2;
-          const vortexHeight = (Math.random() - 0.5) * 10;
-          positions[i * 3] = vortexRadius * Math.cos(vortexAngle);
-          positions[i * 3 + 1] = vortexRadius * Math.sin(vortexAngle);
-          positions[i * 3 + 2] = vortexHeight;
-          break;
-          
-        case 'fractal':
-          // Fractal-like distribution
-          const fractalScale = Math.pow(2, Math.floor(Math.random() * 4));
-          const fractalRadius = 2 + Math.random() * 8;
-          const fractalAngle = Math.random() * Math.PI * 2 * fractalScale;
-          positions[i * 3] = fractalRadius * Math.cos(fractalAngle);
-          positions[i * 3 + 1] = fractalRadius * Math.sin(fractalAngle);
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 5;
-          break;
-          
-        case 'quantumField':
-          // Quantum field distribution with uncertainty
-          const quantumRadius = 3 + Math.random() * 7;
-          const quantumAngle = Math.random() * Math.PI * 2;
-          const quantumHeight = (Math.random() - 0.5) * 8;
-          positions[i * 3] = quantumRadius * Math.cos(quantumAngle) + (Math.random() - 0.5) * 2;
-          positions[i * 3 + 1] = quantumRadius * Math.sin(quantumAngle) + (Math.random() - 0.5) * 2;
-          positions[i * 3 + 2] = quantumHeight + (Math.random() - 0.5) * 2;
-          break;
-          
-        default:
-          // Default spherical distribution
-          radius = 5 + Math.random() * 5;
-          theta = Math.random() * Math.PI * 2;
-          phi = Math.acos(2 * Math.random() - 1);
-          
-          positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-          positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-          positions[i * 3 + 2] = radius * Math.cos(phi);
-      }
+      // Add some noise to create more organic distribution
+      const noise = (Math.random() - 0.5) * 0.5;
       
-      // Assign colors from the current palette
-      const colorIndex = Math.floor(Math.random() * currentPalette.length);
-      const color = currentPalette[colorIndex];
+      positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta) + noise;
+      positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta) + noise;
+      positions[i * 3 + 2] = radius * Math.cos(phi) + noise;
+      
+      // Assign colors with smooth transitions
+      const hue = (i / particleCount) * 0.8 + 0.2;
+      const color = new THREE.Color().setHSL(hue, 0.8, 0.6);
       
       colors[i * 3] = color.r;
       colors[i * 3 + 1] = color.g;
       colors[i * 3 + 2] = color.b;
       
-      // Vary particle sizes
+      // Vary particle sizes with smooth distribution
       sizes[i] = 0.05 + Math.random() * 0.15;
       
-      // Add random velocities for movement
+      // Add smooth velocities
       velocities[i * 3] = (Math.random() - 0.5) * 0.02;
       velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.02;
       velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.02;
       
-      // Add random phases for pulsing effect
+      // Add random phases for smooth pulsing
       phases[i] = Math.random() * Math.PI * 2;
+      
+      // Add lifetimes for smooth transitions
+      lifetimes[i] = Math.random() * 2 + 1;
     }
     
     // Create geometry with all attributes
@@ -761,11 +461,12 @@
     particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     particleGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
     
-    // Store velocities and phases for animation
+    // Store velocities, phases, and lifetimes for animation
     particleGeometry.userData.velocities = velocities;
     particleGeometry.userData.phases = phases;
+    particleGeometry.userData.lifetimes = lifetimes;
     
-    // Create custom shader material for more interesting particles
+    // Create custom shader material for smoother particles
     const particleVertexShader = `
       attribute float size;
       attribute vec3 color;
@@ -775,7 +476,7 @@
       void main() {
         vColor = color;
         
-        // Calculate pulsing effect
+        // Calculate smooth pulsing effect
         float pulse = sin(time * 0.5 + position.x * 0.1 + position.y * 0.1 + position.z * 0.1) * 0.5 + 0.5;
         float finalSize = size * (1.0 + pulse * 0.3);
         
@@ -799,7 +500,7 @@
           discard;
         }
         
-        // Add a subtle glow effect
+        // Add a smooth glow effect
         float glow = 1.0 - r;
         glow = pow(glow, 2.0);
         
@@ -834,15 +535,41 @@
           shaderMaterial.uniforms.time.value += deltaTime;
         }
         
-        // Get position attribute
+        // Get position attribute and user data
         const positions = particleGeometry.attributes.position.array;
         const velocities = particleGeometry.userData.velocities;
+        const phases = particleGeometry.userData.phases;
+        const lifetimes = particleGeometry.userData.lifetimes;
         
-        // Update particle positions
+        // Update particle positions with smooth transitions
         for (let i = 0; i < positions.length; i += 3) {
-          positions[i] += velocities[i] * deltaTime * 30;
-          positions[i + 1] += velocities[i + 1] * deltaTime * 30;
-          positions[i + 2] += velocities[i + 2] * deltaTime * 30;
+          // Update lifetime
+          lifetimes[i / 3] -= deltaTime;
+          
+          // Reset particle if lifetime is over
+          if (lifetimes[i / 3] <= 0) {
+            // Reset position with smooth transition
+            const radius = 3 + Math.random() * 7;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            
+            positions[i] = radius * Math.sin(phi) * Math.cos(theta);
+            positions[i + 1] = radius * Math.sin(phi) * Math.sin(theta);
+            positions[i + 2] = radius * Math.cos(phi);
+            
+            // Reset lifetime
+            lifetimes[i / 3] = Math.random() * 2 + 1;
+            
+            // Update velocity with smooth transition
+            velocities[i] = (Math.random() - 0.5) * 0.02;
+            velocities[i + 1] = (Math.random() - 0.5) * 0.02;
+            velocities[i + 2] = (Math.random() - 0.5) * 0.02;
+          } else {
+            // Update position with smooth velocity
+            positions[i] += velocities[i] * deltaTime * 30;
+            positions[i + 1] += velocities[i + 1] * deltaTime * 30;
+            positions[i + 2] += velocities[i + 2] * deltaTime * 30;
+          }
           
           // Wrap particles around if they go too far
           const maxDistance = 15;
@@ -941,6 +668,9 @@
       hyper9D: 'A 9D hypercube exploring the limits of human spatial perception.',
       hyper10D: 'A 10D hypercube at the boundary of comprehensible dimensional space.',
       hopfFibration: 'A Hopf fibration visualization showing the mapping from 3-sphere to 2-sphere.',
+      hopfTubes: 'A smooth tube-based Hopf fibration with flowing circular fibers and rainbow coloring.',
+      hopfRibbons: 'An elegant ribbon-based Hopf fibration creating flowing dimensional streams.',
+      hopfEducational: 'A Hopf fibration with visible base sphere showing the "sphere with circles" structure.',
       goldenSpiral: 'A golden spiral based on the golden ratio (φ) and Fibonacci sequence.',
       piSpiral: 'A spiral visualization based on the digits of π.',
       kleinBottle: 'A Klein bottle, a non-orientable surface with no inside or outside.',
@@ -948,8 +678,8 @@
       torusKnot: 'A torus knot, a closed curve on the surface of a torus.'
     };
     
-    // Create annotation for current geometry type
-    if (context && annotationTexts[geometryType]) {
+    const annotation = annotationTexts[geometryType as keyof typeof annotationTexts] ?? "No annotation available for this geometry.";
+    if (context) {
       // Clear canvas
       context.clearRect(0, 0, canvas.width, canvas.height);
       
@@ -963,7 +693,7 @@
       context.textAlign = 'left';
       
       // Word wrap text
-      const words = annotationTexts[geometryType].split(' ');
+      const words = annotation.split(' ');
       let line = '';
       let y = 20;
       
@@ -1044,7 +774,7 @@
 
   // Create animations for the current geometry
   function createAnimations() {
-    if (!mesh || !$appStore.isPlaying) return;
+    if (!currentObject || !$appStore.isPlaying) return;
     
     // Clear any existing animations
     if (animations.length > 0) {
@@ -1054,14 +784,17 @@
 
     // Only create rotation animation if auto-rotation is enabled
     if ($appStore.autoRotateDimensions) {
-      const rotationAnimation = gsap.to(mesh.rotation, {
-        y: mesh.rotation.y + Math.PI * 2,
-        duration: 20,
+      const baseDuration = 20; // Base duration in seconds
+      const adjustedDuration = baseDuration / $appStore.speed; // Adjust duration based on speed
+      
+      const rotationAnimation = gsap.to(currentObject.rotation, {
+        y: currentObject.rotation.y + Math.PI * 2,
+        duration: adjustedDuration,
         ease: "none",
         repeat: -1,
         onUpdate: () => {
-          if (mesh) {
-            mesh.rotation.x = Math.sin(Date.now() * 0.001) * 0.2;
+          if (currentObject) {
+            currentObject.rotation.x = Math.sin(Date.now() * 0.001 * $appStore.speed) * 0.2;
           }
         }
       });
@@ -1082,6 +815,12 @@
 
   // Watch for auto-rotation changes
   $: if ($appStore.autoRotateDimensions !== undefined) {
+    createAnimations();
+  }
+
+  // Watch for speed changes and recreate animations
+  $: if ($appStore.speed !== undefined && $appStore.autoRotateDimensions) {
+    console.log('Speed changed to:', $appStore.speed, 'Recreating animations');
     createAnimations();
   }
 
@@ -1138,17 +877,6 @@
     if (material && 'uniforms' in material && material.uniforms) {
       // Set specific parameters based on geometry type
       switch (geometryType) {
-        case 'soundResonance':
-          if ('frequency' in material.uniforms && material.uniforms.frequency && material.uniforms.frequency.value !== undefined) {
-            material.uniforms.frequency.value = 440.0 * (complexity / 5);
-          }
-          if ('amplitude' in material.uniforms && material.uniforms.amplitude && material.uniforms.amplitude.value !== undefined) {
-            material.uniforms.amplitude.value = 0.3 + (symmetry / 20);
-          }
-          if ('resonance' in material.uniforms && material.uniforms.resonance && material.uniforms.resonance.value !== undefined) {
-            material.uniforms.resonance.value = 0.5 + (complexity / 10);
-          }
-          break;
         case 'fractal':
           if ('iteration' in material.uniforms && material.uniforms.iteration && material.uniforms.iteration.value !== undefined) {
             material.uniforms.iteration.value = complexity;
@@ -1168,33 +896,26 @@
             material.uniforms.uncertainty.value = 0.3 + (complexity / 20);
           }
           break;
-        case 'hyper6D':
-        case 'hyper7D':
-        case 'hyper8D':
-        case 'hyper9D':
-        case 'hyper10D':
-          // Higher dimensions already handled by dimensionProjection
-          break;
       }
     }
   }
 
   // Animate transition
   function animateTransition() {
-    if (mesh) {
+    if (currentObject) {
       // Reset position and rotation
-      mesh.position.set(0, 0, 0);
-      mesh.rotation.set(0, 0, 0);
-      mesh.scale.set(0.1, 0.1, 0.1);
+      currentObject.position.set(0, 0, 0);
+      currentObject.rotation.set(0, 0, 0);
+      currentObject.scale.set(0.1, 0.1, 0.1);
       
       // Animate with GSAP
-      gsap.to(mesh.position, {
+      gsap.to(currentObject.position, {
         y: 0,
         duration: 1.5,
         ease: 'elastic.out(1, 0.5)'
       });
       
-      gsap.to(mesh.scale, {
+      gsap.to(currentObject.scale, {
         x: 1,
         y: 1,
         z: 1,
@@ -1202,7 +923,7 @@
         ease: 'elastic.out(1, 0.5)'
       });
       
-      gsap.to(mesh.rotation, {
+      gsap.to(currentObject.rotation, {
         y: Math.PI * 2,
         duration: 2,
         ease: 'power2.inOut'
@@ -1213,6 +934,7 @@
   // Higher dimensional rotation functions
   function applyHyperRotation(object: THREE.Object3D, deltaTime: number) {
     const speed = $appStore.speed * dimensionRotationSpeed;
+    console.log('Applying hyper rotation with speed:', speed, 'Store speed:', $appStore.speed, 'Dimension rotation speed:', dimensionRotationSpeed);
     rotationPhase += deltaTime * speed;
 
     switch (currentPattern) {
@@ -1225,10 +947,10 @@
 
       case ROTATION_PATTERNS.HYPERCUBE:
         // Hypercube pattern - quaternion-based 4D rotation
-        quaternions[0].setFromAxisAngle(new THREE.Vector3(1, 0, 0), rotationPhase * 0.3);
-        quaternions[1].setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationPhase * 0.5);
-        quaternions[2].setFromAxisAngle(new THREE.Vector3(0, 0, 1), rotationPhase * 0.2);
-        quaternions[3].setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), rotationPhase * 0.4);
+        quaternions[0].setFromAxisAngle(new THREE.Vector3(1, 0, 0), rotationPhase * 0.3 * speed);
+        quaternions[1].setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationPhase * 0.5 * speed);
+        quaternions[2].setFromAxisAngle(new THREE.Vector3(0, 0, 1), rotationPhase * 0.2 * speed);
+        quaternions[3].setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), rotationPhase * 0.4 * speed);
         
         object.quaternion.multiplyQuaternions(quaternions[0], quaternions[1]);
         object.quaternion.multiplyQuaternions(object.quaternion, quaternions[2]);
@@ -1238,14 +960,14 @@
       case ROTATION_PATTERNS.QUANTUM:
         // Quantum pattern - probabilistic rotation with uncertainty
         const uncertainty = Math.sin(rotationPhase * 2) * 0.5 + 0.5;
-        object.rotation.x += (Math.random() - 0.5) * uncertainty * deltaTime;
-        object.rotation.y += (Math.random() - 0.5) * uncertainty * deltaTime;
-        object.rotation.z += (Math.random() - 0.5) * uncertainty * deltaTime;
+        object.rotation.x += (Math.random() - 0.5) * uncertainty * deltaTime * speed;
+        object.rotation.y += (Math.random() - 0.5) * uncertainty * deltaTime * speed;
+        object.rotation.z += (Math.random() - 0.5) * uncertainty * deltaTime * speed;
         break;
 
       case ROTATION_PATTERNS.KALEIDOSCOPE:
         // Kaleidoscopic pattern - symmetrical rotations
-        const angle = rotationPhase * 0.5;
+        const angle = rotationPhase * 0.5 * speed;
         const symmetry = 5; // Number of symmetrical rotations
         for (let i = 0; i < symmetry; i++) {
           const phase = angle + (Math.PI * 2 * i) / symmetry;
@@ -1258,24 +980,25 @@
       case ROTATION_PATTERNS.FRACTAL:
         // Fractal pattern - self-similar rotation at different scales
         const scale = Math.pow(2, Math.floor(rotationPhase % 4));
-        object.rotation.x = Math.sin(rotationPhase * scale) * Math.PI;
-        object.rotation.y = Math.cos(rotationPhase * scale) * Math.PI * 0.5;
-        object.rotation.z = Math.sin(rotationPhase * scale * 0.5) * Math.PI * 0.25;
+        object.rotation.x = Math.sin(rotationPhase * scale * speed) * Math.PI;
+        object.rotation.y = Math.cos(rotationPhase * scale * speed) * Math.PI * 0.5;
+        object.rotation.z = Math.sin(rotationPhase * scale * 0.5 * speed) * Math.PI * 0.25;
         break;
     }
 
     // Apply dimension warping based on current dimension mode
     if ($appStore.dimensionMode !== '3D') {
       const dimensionFactor = parseInt($appStore.dimensionMode) || 3;
-      const warpFactor = Math.sin(rotationPhase * 0.3) * 0.2 + 1;
+      const warpFactor = Math.sin(rotationPhase * 0.3 * speed) * 0.2 + 1;
       object.scale.setScalar(Math.pow(warpFactor, dimensionFactor / 3));
     }
   }
 
-  // Update the update function to respect the shouldUpdateRotation flag
+  // Update the update function to include LOD updates
   function update(deltaTime: number) {
     const cappedDelta = Math.min(deltaTime, 0.1);
-    time += cappedDelta;
+    const speedMultiplier = $appStore.speed;
+    time += cappedDelta * speedMultiplier;
 
     // Update controls
     if (controls) {
@@ -1283,64 +1006,85 @@
     }
     
     // Apply smooth rotation interpolation
-    if (mesh) {
+    if (currentObject && (currentObject instanceof THREE.Mesh || currentObject instanceof THREE.Points)) {
       // Interpolate current rotation towards target rotation
-      currentRotation.x += (targetRotation.x - currentRotation.x) * ROTATION_INTERPOLATION_SPEED;
-      currentRotation.y += (targetRotation.y - currentRotation.y) * ROTATION_INTERPOLATION_SPEED;
-      currentRotation.z += (targetRotation.z - currentRotation.z) * ROTATION_INTERPOLATION_SPEED;
-      currentRotation.w += (targetRotation.w - currentRotation.w) * ROTATION_INTERPOLATION_SPEED;
-      currentRotation.v += (targetRotation.v - currentRotation.v) * ROTATION_INTERPOLATION_SPEED;
-      
+      const interpolationSpeed = ROTATION_INTERPOLATION_SPEED * $appStore.speed;
+      currentRotation.x += (targetRotation.x - currentRotation.x) * interpolationSpeed;
+      currentRotation.y += (targetRotation.y - currentRotation.y) * interpolationSpeed;
+      currentRotation.z += (targetRotation.z - currentRotation.z) * interpolationSpeed;
+      currentRotation.w += (targetRotation.w - currentRotation.w) * interpolationSpeed;
+      currentRotation.v += (targetRotation.v - currentRotation.v) * interpolationSpeed;
       // Apply interpolated rotation to mesh
-      mesh.rotation.x = currentRotation.x;
-      mesh.rotation.y = currentRotation.y;
-      mesh.rotation.z = currentRotation.z;
-      
+      (currentObject as THREE.Mesh | THREE.Points).rotation.x = currentRotation.x;
+      (currentObject as THREE.Mesh | THREE.Points).rotation.y = currentRotation.y;
+      (currentObject as THREE.Mesh | THREE.Points).rotation.z = currentRotation.z;
       // Apply higher dimension rotations through quaternions or matrix transformations
       if (currentRotation.w !== 0 || currentRotation.v !== 0) {
         // Create quaternions for W and V axis rotations
         const wQuaternion = new THREE.Quaternion();
         wQuaternion.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), currentRotation.w);
-        
         const vQuaternion = new THREE.Quaternion();
         vQuaternion.setFromAxisAngle(new THREE.Vector3(-1, 1, -1).normalize(), currentRotation.v);
-        
         // Apply quaternions to mesh
-        mesh.quaternion.multiplyQuaternions(wQuaternion, mesh.quaternion);
-        mesh.quaternion.multiplyQuaternions(vQuaternion, mesh.quaternion);
+        (currentObject as THREE.Mesh | THREE.Points).quaternion.multiplyQuaternions(wQuaternion, (currentObject as THREE.Mesh | THREE.Points).quaternion);
+        (currentObject as THREE.Mesh | THREE.Points).quaternion.multiplyQuaternions(vQuaternion, (currentObject as THREE.Mesh | THREE.Points).quaternion);
       }
-      
       // Update rotation phase for shader effects
       rotationPhase = currentRotation.y;
     }
 
+    // Update LOD if needed
+    if (lodUpdateFunction) {
+      lodUpdateFunction();
+    }
+
     // Only apply auto-rotation if auto-rotation is enabled and manual rotation is not active
-    if (mesh && $appStore.autoRotateDimensions && !manualRotationActive && $appStore.isPlaying) {
-      applyHyperRotation(mesh, cappedDelta);
+    if ($appStore.autoRotateDimensions && !manualRotationActive && currentObject && (currentObject instanceof THREE.Mesh || currentObject instanceof THREE.Points)) {
+      applyHyperRotation(currentObject, cappedDelta);
     }
 
     // Update particle system if it exists
     if (particleSystem) {
-      particleSystem.update(cappedDelta);
+      particleSystem.update(cappedDelta * $appStore.speed);
     }
 
-    // Update material uniforms
+    // Update material uniforms for all objects in the scene
     if (material && 'uniforms' in material && material.uniforms) {
-      if (material.uniforms.time) {
+      if ('time' in material.uniforms && material.uniforms.time) {
         material.uniforms.time.value = time;
       }
-      material.uniforms.rotationPhase = { value: rotationPhase };
-      material.uniforms.dimensionFactor = { 
-        value: parseInt($appStore.dimensionMode) || 3 
-      };
-      
-      // Add higher dimension rotation uniforms if they exist
-      if ('wRotation' in material.uniforms) {
-        material.uniforms.wRotation = { value: currentRotation.w };
+      if ('rotationPhase' in material.uniforms && material.uniforms.rotationPhase) {
+        material.uniforms.rotationPhase.value = rotationPhase;
       }
-      if ('vRotation' in material.uniforms) {
-        material.uniforms.vRotation = { value: currentRotation.v };
+      if ('wRotation' in material.uniforms && material.uniforms.wRotation) {
+        material.uniforms.wRotation.value = currentRotation.w;
       }
+      if ('vRotation' in material.uniforms && material.uniforms.vRotation) {
+        material.uniforms.vRotation.value = currentRotation.v;
+      }
+    }
+    
+    // Also update materials in groups (like Hopf fibrations)
+    if (currentObject) {
+      currentObject.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material && 'uniforms' in child.material) {
+          const mat = child.material as THREE.ShaderMaterial;
+          if (mat.uniforms) {
+            if ('time' in mat.uniforms && mat.uniforms.time) {
+              mat.uniforms.time.value = time;
+            }
+            if ('rotationPhase' in mat.uniforms && mat.uniforms.rotationPhase) {
+              mat.uniforms.rotationPhase.value = rotationPhase;
+            }
+            if ('wRotation' in mat.uniforms && mat.uniforms.wRotation) {
+              mat.uniforms.wRotation.value = currentRotation.w;
+            }
+            if ('vRotation' in mat.uniforms && mat.uniforms.vRotation) {
+              mat.uniforms.vRotation.value = currentRotation.v;
+            }
+          }
+        }
+      });
     }
   }
 
@@ -1735,7 +1479,7 @@
     
     // Update animations
     if (animationMixer) {
-      animationMixer.stopAllAction();
+      (animationMixer as THREE.AnimationMixer).stopAllAction();
     }
     
     // Update scene
@@ -1745,9 +1489,11 @@
   // Cleanup on destroy
   onDestroy(() => {
     // Clean up Three.js objects
-    if (geometry) geometry.dispose();
-    if (material) material.dispose();
-    if (mesh) scene.remove(mesh);
+    if (geometry) (geometry as THREE.BufferGeometry).dispose();
+    if (material) (material as THREE.Material).dispose();
+    if (currentObject && (currentObject instanceof THREE.Mesh || currentObject instanceof THREE.Points)) {
+      scene.remove(currentObject);
+    }
     if (particles) scene.remove(particles);
     if (particleGeometry) particleGeometry.dispose();
     if (particleMaterial) particleMaterial.dispose();
@@ -1760,7 +1506,7 @@
       });
     }
     if (animationMixer) {
-      animationMixer.stopAllAction();
+      (animationMixer as THREE.AnimationMixer).stopAllAction();
     }
     if (animations.length > 0) {
       animations = [];
@@ -1792,11 +1538,11 @@
   });
 
   function resetView() {
-    if (!mesh || !controls) return;
+    if (!currentObject || !controls) return;
     
     // Stop any ongoing animations
     if (animationMixer) {
-      animationMixer.stopAllAction();
+      (animationMixer as THREE.AnimationMixer).stopAllAction();
     }
     
     // Kill any existing GSAP animations
@@ -1812,10 +1558,10 @@
     targetRotationPhase = 0;
     
     // Reset position and rotation
-    mesh.position.set(0, 0, 0);
-    mesh.rotation.set(0, 0, 0);
-    mesh.scale.set(1, 1, 1);
-    mesh.quaternion.set(0, 0, 0, 1);
+    (currentObject as THREE.Mesh | THREE.Points).position.set(0, 0, 0);
+    (currentObject as THREE.Mesh | THREE.Points).rotation.set(0, 0, 0);
+    (currentObject as THREE.Mesh | THREE.Points).scale.set(1, 1, 1);
+    (currentObject as THREE.Mesh | THREE.Points).quaternion.set(0, 0, 0, 1);
     
     // Reset controls
     controls.reset();
@@ -1833,9 +1579,9 @@
       shouldUpdateRotation = false;
       
       // Force the mesh to stay at reset position
-      mesh.rotation.set(0, 0, 0);
-      mesh.position.set(0, 0, 0);
-      mesh.quaternion.set(0, 0, 0, 1);
+      (currentObject as THREE.Mesh | THREE.Points).rotation.set(0, 0, 0);
+      (currentObject as THREE.Mesh | THREE.Points).position.set(0, 0, 0);
+      (currentObject as THREE.Mesh | THREE.Points).quaternion.set(0, 0, 0, 1);
       
       // Update material uniforms to reset rotation
       if (material && 'uniforms' in material && material.uniforms) {
@@ -1857,11 +1603,11 @@
 
   // Add a new function to handle pausing
   function handlePause() {
-    if (!mesh) return;
+    if (!currentObject) return;
     
     // Stop any ongoing animations
     if (animationMixer) {
-      animationMixer.stopAllAction();
+      (animationMixer as THREE.AnimationMixer).stopAllAction();
     }
     
     // Kill any existing GSAP animations
@@ -1877,9 +1623,9 @@
     targetRotationPhase = 0;
     
     // Force the mesh to stay at reset position
-    mesh.rotation.set(0, 0, 0);
-    mesh.position.set(0, 0, 0);
-    mesh.quaternion.set(0, 0, 0, 1);
+    (currentObject as THREE.Mesh | THREE.Points).rotation.set(0, 0, 0);
+    (currentObject as THREE.Mesh | THREE.Points).position.set(0, 0, 0);
+    (currentObject as THREE.Mesh | THREE.Points).quaternion.set(0, 0, 0, 1);
     
     // Disable rotation updates
     shouldUpdateRotation = false;
@@ -1896,6 +1642,74 @@
       if ('vRotation' in material.uniforms) {
         material.uniforms.vRotation.value = 0;
       }
+    }
+  }
+
+  // Initialize camera
+  camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
+  camera.position.z = 8; // Increased from 5 to 8 to see more of the field
+
+  // Update the material creation logic
+  function createMaterialForGeometry(type: GeometryType): CustomShaderMaterial {
+    if (type === 'juliaSet') {
+      return new THREE.ShaderMaterial({
+        vertexShader: JuliaSetShader.vertexShader,
+        fragmentShader: JuliaSetShader.fragmentShader,
+        uniforms: {
+          ...JuliaSetShader.uniforms,
+          time: { value: 0 },
+          c: { value: new THREE.Vector2(...juliaComplex) },
+          maxIterations: { value: juliaIterations },
+          dimensionProjection: { value: dimensionProjection }
+        }
+      });
+    }
+    return createMaterial(colorMode);
+  }
+
+  // Update the geometry creation logic
+  function createGeometryForType(type: GeometryType): any {
+    if (type === 'juliaSet') {
+      return createJuliaSet(juliaIterations, juliaComplex, juliaResolution);
+    }
+    if (type === 'hopfTubes') {
+      // Beautiful tube-based Hopf fibration with improved smoothness
+      return createHopfFibrationTubes(complexity, 1, 0.02, 120);
+    }
+    if (type === 'hopfRibbons') {
+      // Elegant ribbon-based Hopf fibration for maximum visual appeal
+      return createHopfFibrationRibbons(complexity, 1, 0.08, 0.015);
+    }
+    if (type === 'hopfEducational') {
+      // Educational Hopf fibration showing the base sphere structure
+      return createHopfFibrationWithBaseSphere(complexity, 1, true);
+    }
+    if (type === 'hopfFibration') {
+      // Use the smooth point-based Hopf fibration (now much cleaner)
+      return createHopfFibration(complexity, 1);
+    }
+    return createGeometry(type, complexity, symmetry);
+  }
+
+  // When adding to the scene, check if the returned object is a THREE.Group
+  function addGeometryToScene(geometryOrGroup: any) {
+    // Remove previous object if it exists
+    if (typeof currentObject !== 'undefined' && currentObject) {
+      scene.remove(currentObject);
+    }
+    if (geometryOrGroup instanceof THREE.Group) {
+      scene.add(geometryOrGroup);
+      currentObject = geometryOrGroup;
+    } else {
+      const material = createMaterialForGeometry(geometryType);
+      const mesh = new THREE.Mesh(geometryOrGroup, material);
+      scene.add(mesh);
+      currentObject = mesh;
     }
   }
 </script>

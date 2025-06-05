@@ -560,78 +560,187 @@ export function createQuantumFieldMaterial(): THREE.ShaderMaterial & { uniforms:
   return new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
-      particleCount: { value: 100.0 },
-      entanglement: { value: 0.7 },
-      uncertainty: { value: 0.3 },
       colorA: { value: new THREE.Color(0x00ffff) },
       colorB: { value: new THREE.Color(0xff00ff) },
-      colorC: { value: new THREE.Color(0xffff00) }
+      colorC: { value: new THREE.Color(0xffff00) },
+      smoothness: { value: 0.8 },
+      fieldStrength: { value: 1.2 },
+      glowIntensity: { value: 0.7 },
+      waveSpeed: { value: 1.0 },
+      waveFrequency: { value: 2.0 },
+      quantumState: { value: 0.0 },
+      superposition: { value: 0.5 },
+      entanglement: { value: 0.7 },
+      uncertainty: { value: 0.5 },
+      particleCount: { value: 100 },
+      dimensionProjection: { value: 0.5 }
     },
     vertexShader: `
       varying vec3 vPosition;
       varying vec3 vNormal;
+      varying vec2 vUv;
+      varying float vLayer;
       
       void main() {
         vPosition = position;
         vNormal = normalize(normalMatrix * normal);
+        vUv = uv;
+        
+        // Calculate layer based on position
+        vLayer = length(position) / 3.0;
+        
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: `
       uniform float time;
-      uniform float particleCount;
-      uniform float entanglement;
-      uniform float uncertainty;
       uniform vec3 colorA;
       uniform vec3 colorB;
       uniform vec3 colorC;
+      uniform float smoothness;
+      uniform float fieldStrength;
+      uniform float glowIntensity;
+      uniform float waveSpeed;
+      uniform float waveFrequency;
+      uniform float quantumState;
+      uniform float superposition;
+      uniform float entanglement;
+      uniform float uncertainty;
+      uniform float particleCount;
+      uniform float dimensionProjection;
       
       varying vec3 vPosition;
       varying vec3 vNormal;
+      varying vec2 vUv;
+      varying float vLayer;
       
-      // Quantum noise function
-      float quantumNoise(vec3 pos, float t) {
-        return fract(sin(dot(pos, vec3(12.9898, 78.233, 45.164))) * 43758.5453 + t);
+      // Quantum noise function with improved randomness
+      float quantumNoise(vec3 p, float t) {
+        vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+        p3 += dot(p3, p3.yxz + 33.33);
+        return fract((p3.x + p3.y) * p3.z + t);
       }
       
-      // Simulate quantum entanglement
-      float entanglement(vec3 pos, float t) {
-        float noise1 = quantumNoise(pos, t);
-        float noise2 = quantumNoise(pos * 2.0, t * 1.7);
-        float noise3 = quantumNoise(pos * 3.0, t * 0.3);
+      // Enhanced wave function with interference
+      float waveFunction(vec3 p, float t) {
+        float k = waveFrequency;
+        float omega = waveSpeed;
         
-        return (noise1 + noise2 + noise3) / 3.0;
+        // Multiple wave components
+        float psi1 = sin(k * length(p) - omega * t);
+        float psi2 = cos(k * length(p) - omega * t * 0.7);
+        float psi3 = sin(k * length(p) * 0.5 - omega * t * 1.3);
+        
+        // Interference pattern
+        float interference = sin(dot(p, vec3(1.0, 2.0, 3.0)) * k - t) * 0.5 + 0.5;
+        
+        // Combine wave functions with interference
+        return (psi1 * psi1 + psi2 * psi2 + psi3 * psi3) * 0.33 * (1.0 + interference * 0.2);
+      }
+      
+      // Enhanced quantum tunneling with multiple barriers
+      float tunneling(vec3 p, float t) {
+        float barriers[3] = float[3](1.0, 1.5, 2.0);
+        float particleEnergy = 0.8;
+        float totalTunneling = 0.0;
+        
+        for(int i = 0; i < 3; i++) {
+          float distance = abs(length(p) - (3.0 * (1.0 + float(i) * 0.2)));
+          totalTunneling += exp(-2.0 * sqrt(2.0 * (barriers[i] - particleEnergy)) * distance);
+        }
+        
+        return totalTunneling / 3.0;
+      }
+      
+      // Quantum superposition with multiple states
+      vec3 superpositionState(vec3 p, float t) {
+        // Multiple possible states
+        vec3 state1 = vec3(sin(t), cos(t), sin(t * 0.5));
+        vec3 state2 = vec3(cos(t), sin(t), cos(t * 0.5));
+        vec3 state3 = vec3(sin(t * 1.5), cos(t * 1.5), sin(t));
+        
+        // Dynamic superposition coefficients
+        float alpha = superposition * (0.5 + 0.5 * sin(t * 0.5));
+        float beta = (1.0 - superposition) * (0.5 + 0.5 * cos(t * 0.7));
+        
+        return normalize(mix(mix(state1, state2, alpha), state3, beta));
+      }
+      
+      // Enhanced entanglement effect
+      float entanglementEffect(vec3 p, float t) {
+        float dist = length(p);
+        float phase = t * waveSpeed;
+        
+        // Multiple entangled wave functions
+        float psi1 = sin(dist * waveFrequency - phase);
+        float psi2 = sin(dist * waveFrequency + phase);
+        float psi3 = cos(dist * waveFrequency * 0.5 - phase * 1.5);
+        
+        // Entanglement correlation
+        float correlation = sin(dot(p, vec3(1.0, 2.0, 3.0)) * waveFrequency) * 0.5 + 0.5;
+        
+        return (psi1 * psi2 * psi3) * entanglement * (1.0 + correlation * 0.3);
+      }
+      
+      // Uncertainty visualization
+      float uncertaintyField(vec3 p, float t) {
+        float noise = quantumNoise(p, t);
+        float uncertainty = sin(length(p) * 5.0 - t * 2.0) * 0.5 + 0.5;
+        return noise * uncertainty * (1.0 + sin(t * 3.0) * 0.2);
       }
       
       void main() {
-        // Create quantum field pattern
-        float field = entanglement(vPosition, time);
+        float t = time * 0.5;
         
-        // Add uncertainty principle effect
-        float uncertainty = sin(vPosition.x * 10.0 + time) * 
-                           cos(vPosition.y * 10.0 + time * 0.7) * 
-                           sin(vPosition.z * 10.0 + time * 1.3) * 0.5 + 0.5;
+        // Calculate quantum effects
+        float probability = waveFunction(vPosition, t);
+        float tunnel = tunneling(vPosition, t);
+        vec3 superState = superpositionState(vPosition, t);
+        float entangled = entanglementEffect(vPosition, t);
+        float uncertain = uncertaintyField(vPosition, t);
         
-        // Create color based on field and uncertainty
-        vec3 fieldColor = mix(colorA, colorB, field);
-        fieldColor = mix(fieldColor, colorC, uncertainty);
+        // Layer-specific effects
+        float layerEffect = sin(vLayer * 3.14159 + t) * 0.5 + 0.5;
         
-        // Add particle-like points
-        float particle = sin(vPosition.x * particleCount + time) * 
-                        sin(vPosition.y * particleCount + time * 1.2) * 
-                        sin(vPosition.z * particleCount + time * 0.8);
-        particle = smoothstep(0.8, 1.0, particle);
+        // Combine quantum effects with layer influence
+        float quantumEffect = mix(probability, tunnel, 0.5);
+        quantumEffect = mix(quantumEffect, entangled, entanglement);
+        quantumEffect = mix(quantumEffect, uncertain, uncertainty);
+        quantumEffect *= (1.0 + layerEffect * 0.3);
         
-        fieldColor += vec3(particle) * 0.5;
+        // Create color based on quantum state and layer
+        vec3 baseColor = mix(colorA, colorB, quantumEffect);
+        baseColor = mix(baseColor, colorC, dot(superState, vNormal) * 0.5 + 0.5);
         
-        // Add fresnel edge glow
+        // Add quantum state influence
+        baseColor = mix(baseColor, vec3(1.0), quantumState * 0.3);
+        
+        // Add fresnel edge glow with layer variation
         float fresnel = pow(1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0))), 3.0);
-        fieldColor += vec3(fresnel) * 0.5;
+        fresnel *= (1.0 + layerEffect * 0.5);
+        baseColor += vec3(fresnel) * glowIntensity;
+        
+        // Add field strength effect
+        baseColor *= fieldStrength;
+        
+        // Add particle count influence
+        float particleEffect = sin(vPosition.x * particleCount * 0.1 + t) * 
+                             cos(vPosition.y * particleCount * 0.1 + t) * 
+                             sin(vPosition.z * particleCount * 0.1 + t);
+        baseColor += vec3(particleEffect) * 0.2;
+        
+        // Add dimension projection effect
+        float dimensionEffect = sin(dot(vPosition, vec3(1.0, 2.0, 3.0)) * dimensionProjection + t) * 0.5 + 0.5;
+        baseColor = mix(baseColor, baseColor * 1.5, dimensionEffect * 0.3);
         
         // Output final color
-        gl_FragColor = vec4(fieldColor, 1.0);
+        gl_FragColor = vec4(baseColor, 1.0);
       }
-    `
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide
   }) as THREE.ShaderMaterial & { uniforms: MaterialUniforms };
 }
 
